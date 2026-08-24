@@ -2,7 +2,7 @@
 
 ## 목적
 
-이 문서는 `litellm-rust/`의 현재 구현 범위를 확인하고, 대시보드를 제외한 모든 코드를 Go로 재개발하는 최종 전환에서 각 Rust 기능을 어떤 Go 구성요소로 대체할지 정의한다. 이 문서는 Rust 코드를 기계적으로 번역하기 위한 문서가 아니다. 공개 계약과 운영 동작을 보존하면서 Python·Rust 의존성을 제거하기 위한 inventory다
+이 문서는 `litellm-rust/`의 현재 구현 범위를 확인하고, `ui/` 대시보드를 유지한 채 Python/Rust 코드를 Go로 재개발하는 최종 전환에서 각 Rust 기능을 어떤 Go 구성요소로 대체할지 정의한다. 이 문서는 Rust 코드를 기계적으로 번역하기 위한 문서가 아니다. 공개 계약과 운영 동작을 보존하면서 Python·Rust 의존성을 제거하기 위한 inventory다
 
 Rust도 Python과 동일하게 먼저 파일 책임과 test assertion을 1:1 Go parity 구현으로 대응한다. Go package 통합·파일 분할·중복 제거는 parity gate 통과 후 별도의 refactor 단계에서만 수행한다
 
@@ -41,7 +41,7 @@ PostgreSQL + Redis/Valkey
 - Rust의 provider 변환, protocol 규칙, error mapping, request/response fixture는 Go 재구현 대상이다
 - PyO3, GIL, embedded Python config reader, Python Proxy callback API는 보존 대상이 아니라 제거 대상이다
 - 현재 Rust가 Python에 위임하는 config, rollout, fallback, spend tracking, callback은 Go Gateway/Worker의 native 기능으로 옮긴다
-- Go 구현의 완료 기준은 Rust 구현의 존재가 아니라 Python/Rust 기준과의 contract test 통과, 기존 비-UI test/tooling의 Go 재작성, 그리고 production Go-only deployment다
+- Go 구현의 완료 기준은 Rust 구현의 존재가 아니라 Python/Rust 기준과의 contract test 통과, 기존 Python/Rust test/tooling의 Go 재작성, 그리고 production Go-only deployment다
 
 ## 기능별 inventory 및 Go 매핑
 

@@ -2,7 +2,7 @@
 
 ## 목적
 
-이 문서는 `ui/litellm-dashboard/`를 제외한 LiteLLM의 Python 코드를 Go로 재개발하기 위한 범위를 정의한다. 최종 목표는 Python 런타임·패키지·테스트·CLI·스크립트 없이 Go 서비스, Go SDK, Go CLI, Go test만으로 LiteLLM을 빌드·검증·배포하는 것이다
+이 문서는 `ui/`를 제외한 LiteLLM의 Python 코드를 Go로 재개발하기 위한 범위를 정의한다. 최종 목표는 Python 런타임·패키지·테스트·CLI·스크립트 없이 Go 서비스, Go SDK, Go CLI, Go test만으로 LiteLLM을 빌드·검증·배포하는 것이다. `ui/`의 대시보드는 그대로 유지한다
 
 이 문서는 Python 파일을 줄 단위로 번역하라는 의미가 아니다. Python 구현이 제공하는 공개 계약, provider 동작, 운영 기능, 데이터 의미론을 Go의 단순하고 강타입인 설계로 재구현한다
 
@@ -29,7 +29,7 @@
 
 ### 제외
 
-- `ui/litellm-dashboard/`의 Next.js/React/TypeScript 코드와 UI 전용 Playwright 테스트
+- `ui/`의 Next.js/React/TypeScript 대시보드 코드와 UI 전용 Playwright 테스트
 - Markdown, YAML, JSON, SQL, HCL, Helm chart, Dockerfile와 같이 실행 언어가 아닌 설정·문서 artifact
 - 기능의 source-of-truth가 아닌 generated asset, 오래된 example, 중복 test/tool. 이들은 Go로 포팅하지 않고 단계 0 inventory에서 삭제 근거를 기록한다
 
@@ -185,7 +185,7 @@ parity 단계에서는 `internal/parity/` 아래에 원본 책임을 추적하�
 
 ## 최종 검증 게이트
 
-- `git ls-files` 기준 `ui/litellm-dashboard/` 밖에 Python source가 없다. 예외가 필요한 데이터 fixture는 `.py`가 아닌 JSON/YAML/SQL로 변환한다
+- `git ls-files` 기준 `ui/` 밖에 Python source가 없다. 예외가 필요한 데이터 fixture는 `.py`가 아닌 JSON/YAML/SQL로 변환한다
 - production image, Go SDK/CLI image, Go test/tool image에 Python interpreter, `pip`, Python wheel, PyO3 bridge가 없다
 - 모든 지원 provider/endpoint에는 Go implementation, contract test, owner가 있다
 - 모든 `port` Python 파일에는 source-to-Go parity mapping, Go parity test, parity-passing 상태가 있다. refactor는 이 gate 뒤에만 시작하고, refactor 전후 mapping ID와 contract fixture를 유지한다

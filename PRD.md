@@ -1,8 +1,8 @@
-# LiteLLM 비-UI 전체 Go 재개발 및 Enterprise 기능 PRD
+# LiteLLM Python/Rust Go 전환 및 Enterprise 기능 PRD
 
 ## 1. 문서 목적
 
-이 문서는 LiteLLM의 대시보드 외 모든 실행 코드와 테스트를 Go로 재개발하고, 기존 Next.js 대시보드는 유지하며, Enterprise 기능을 Go 플랫폼에 구현하기 위한 제품 범위, 우선순위, 호환성 기준 및 요구사항을 정의한다. 최종 제품 저장소에는 대시보드 이외의 Python·Rust·비대시보드 JavaScript/TypeScript 소스가 남지 않는다
+이 문서는 LiteLLM의 Python과 Rust 실행 코드·테스트를 Go로 재개발하고, `ui/` 디렉토리의 기존 Next.js 대시보드는 유지하며, Enterprise 기능을 Go 플랫폼에 구현하기 위한 제품 범위, 우선순위, 호환성 기준 및 요구사항을 정의한다. 최종 제품에는 `ui/` 밖의 Python·Rust 실행 소스와 런타임 의존성이 남지 않는다
 
 기능 누락 방지를 위한 구현 순서는 고정한다. 먼저 기존 Python/Rust의 기능 파일과 테스트를 1:1로 대응하는 Go parity 구현으로 완성한다. 그 뒤 별도 변경으로만 Go에 맞는 package 구조와 중복 제거를 리팩터링한다. parity 구현과 구조 리팩터링을 같은 변경에서 수행하지 않는다
 
@@ -11,7 +11,6 @@
 2026-08-20 저장소 조사 기준:
 
 - 추적된 Python 파일은 5,277개, Rust 파일은 110개다. Enterprise 하위에는 Python 파일 149개가 있다
-- 대시보드 밖 JavaScript/TypeScript 파일은 296개가 있으나, 이 중 상당수는 experimental 경로의 생성된 정적 asset이다. 단계 0에서 source, generated artifact, 삭제 대상으로 구분한다
 - Python Proxy에는 약 757개의 HTTP 라우트 선언이 있으며, 관리, 인증, 비용, 관측성, OpenAI 호환 API 등 넓은 표면적을 가진다
 - `litellm/llms/`에는 100개가 넘는 공급자 어댑터가 있다
 - Rust 워크스페이스는 `core`, `ai-gateway`, `python-bridge` 크레이트로 분리되어 있고, messages, responses, audio transcription, OCR, realtime 및 일부 OpenAI, Anthropic, Bedrock, Azure AI, Vertex AI, Mistral 경로를 단계적으로 구현 중이다. 구성, 재시도, 라우팅 정책, 로깅, 비용 추적, 고객 플러그인은 여전히 Python이 담당한다. Rust 런타임도 최종적으로 Go 구현으로 대체 대상이다
@@ -23,13 +22,13 @@
 
 ## 3. 제품 비전
 
-Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go 서비스와 Go SDK는 현재 Python SDK·Proxy·관리 API·CLI·백그라운드 작업·테스트·Rust core/bridge/gateway가 제공하는 동작을 모두 대체한다. 기존 Next.js 대시보드는 유일한 UI 예외로 유지하며, Go API의 호환 계약을 통해 같은 기능을 계속 제공한다. Enterprise 고객은 중앙 인증, 세분화된 권한, 정책 집행, 비용 통제 및 감사를 기본 기능으로 사용해야 한다
+Go 기반 LiteLLM 플랫폼을 Python/Rust 없는 단일 backend 구현 언어로 제공한다. Go 서비스와 Go SDK는 현재 Python SDK·Proxy·관리 API·CLI·백그라운드 작업·테스트·Rust core/bridge/gateway가 제공하는 동작을 모두 대체한다. `ui/`의 기존 Next.js 대시보드는 유지하며, Go API의 호환 계약을 통해 같은 기능을 계속 제공한다. Enterprise 고객은 중앙 인증, 세분화된 권한, 정책 집행, 비용 통제 및 감사를 기본 기능으로 사용해야 한다
 
 ## 4. 목표와 비목표
 
 ### 목표
 
-1. `ui/litellm-dashboard/`를 제외한 모든 실행 코드와 테스트를 Go 구현 또는 비코드 설정으로 대체한다
+1. `ui/`를 제외한 Python/Rust 실행 코드와 테스트를 Go 구현으로 대체한다
 2. 기존 Python Proxy와 Rust 서비스를 병행 실행하면서 요청 단위로 안전하게 Go로 전환한다
 3. 모든 지원 endpoint와 공급자에 대해 요청·응답·스트리밍·오류 의미론의 호환성을 보장한다
 4. Enterprise 핵심 제어면을 Go 서비스에 포함한다: 조직·프로젝트·팀·사용자·가상 키, RBAC, SSO, SCIM, 예산, 감사 로그 및 정책 기반 Guardrail 적용
@@ -41,8 +40,8 @@ Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go �
 
 - 대시보드를 Go 또는 다른 프런트엔드 기술로 재작성하지 않는다. 현재 Next.js/React/TypeScript 대시보드를 유지한다
 - 현재 Rust 코드의 기계적 포팅을 목표로 하지 않는다. 검증된 동작과 공개 계약을 기준으로 Go 설계를 새로 만든다
-- 최종 상태에서 `ui/litellm-dashboard/` 밖의 Python, Rust, JavaScript, TypeScript 실행 소스를 요청 처리, SDK, CLI, worker, provider adapter, plugin 또는 테스트에 요구하지 않는다
-- YAML, JSON, SQL, HCL, Dockerfile, Helm chart, Markdown 및 대시보드의 TypeScript/TSX는 Go 코드 전환 대상이 아니다. 기존 Python/Rust/비대시보드 JS/TS의 동작은 Go로 재구현하거나 생성물·중복물은 삭제한다
+- 최종 상태에서 `ui/` 밖의 Python 또는 Rust 실행 소스를 요청 처리, SDK, CLI, worker, provider adapter, plugin 또는 테스트에 요구하지 않는다
+- YAML, JSON, SQL, HCL, Dockerfile, Helm chart, Markdown 및 `ui/`의 TypeScript/TSX는 Go 전환 대상이 아니다. 기존 Python/Rust의 동작은 Go로 재구현하거나 generated artifact·중복물·폐기 기능은 근거를 남겨 삭제한다
 - Enterprise 라이선스 코드를 오픈소스 경로로 복사하거나 상업 라이선스 경계를 변경하지 않는다
 
 ## 5. 사용자와 핵심 시나리오
@@ -59,20 +58,19 @@ Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go �
 
 ### 6.1 최종 전환 범위
 
-최종 전환 범위는 `ui/litellm-dashboard/`를 제외한 실행 코드 전체다. `litellm/`, `litellm-rust/`, `enterprise/`, `backend/`, `gateway/`, `litellm-proxy-extras/`, `scripts/`, `cookbook/`, `tests/`에 있는 Python·Rust·비대시보드 JS/TS 코드는 Go로 재구현하거나 삭제한다. 다음 항목을 포함한다:
+최종 전환 범위는 `ui/`를 제외한 Python과 Rust 실행 코드 전체다. `litellm/`, `litellm-rust/`, `enterprise/`, `backend/`, `gateway/`, `litellm-proxy-extras/`, `scripts/`, `cookbook/`, `tests/`에 있는 Python/Rust 코드는 Go로 재구현하거나 삭제한다. 다음 항목을 포함한다:
 
 - Python SDK의 동기/비동기 public API, typed model, configuration, retry, callback, caching, router, secret manager, provider transform 및 모든 지원 endpoint
 - Proxy의 공개/관리/Enterprise API, 인증·권한, policy, guardrail, spend tracking, DB transaction queue, health, background job, webhook 및 observability 경로
 - Rust `core`, `ai-gateway`, `python-bridge`의 route, provider, routing, realtime 및 bridge 기능
 - 상업 라이선스 경계 안의 Enterprise 런타임 기능. 라이선스 경계 자체는 유지한다
 - Python/Rust unit·integration·E2E·load test, local mock server, CLI, migration/maintenance script. UI 전용 Playwright/TypeScript 테스트는 대시보드 유지 범위에 속한다
-- `litellm/proxy/_experimental/out/`처럼 생성된 비대시보드 JavaScript bundle은 Go로 포팅하지 않고 source-of-truth를 확인한 뒤 재생성하거나 삭제한다
 
 대시보드와 UI 전용 테스트는 유지 대상이다. Terraform provider는 이미 Go로 구현되어 있어 새 Go API와의 호환성 검증·필요 시 수정 대상이다. Markdown, Helm, Terraform HCL, SQL migration, Docker/CI 설정은 실행 언어 전환 대상이 아닌 배포·운영 artifact로 유지한다
 
 ### 6.2 파일 1:1 parity 전환 규칙
 
-1:1은 파일 이름이나 구현 문법을 기계적으로 복사한다는 뜻이 아니다. 각 기존 Python/Rust 실행 파일의 단일 책임, 공개 심볼, 입력·출력·오류·부작용, 그리고 연결된 테스트를 하나의 Go source/test 대응 항목으로 보존한다는 뜻이다
+1:1은 파일 이름이나 구현 문법을 기계적으로 복사한다는 뜻이 아니다. 각 `ui/` 밖 기존 Python/Rust 실행 파일의 단일 책임, 공개 심볼, 입력·출력·오류·부작용, 그리고 연결된 테스트를 하나의 Go source/test 대응 항목으로 보존한다는 뜻이다
 
 - 단계 0에서 각 원본 파일에 `source_path`, `source_language`, `responsibility`, `public_contract`, `go_parity_path`, `go_test_path`, `status`, `owner`를 가진 migration manifest를 만든다
 - 실행 동작이 있는 원본 파일은 하나의 Go parity 파일에 대응한다. 빈 package marker, generated artifact, 중복 test helper, 폐기 기능은 포팅 대신 삭제할 수 있으나 근거와 대체 fixture 또는 삭제 승인 상태를 manifest에 남긴다
@@ -164,14 +162,14 @@ Client / OpenAI SDK / Admin UI
 
 | 단계 | 제공 범위 | 완료 기준 |
 | --- | --- | --- |
-| 0. 기준선 | 비-UI source inventory, migration manifest, API/데이터 모델 매핑, language-neutral golden fixture, 성능·오류 기준 수집 | 모든 비-UI `.py`, `.rs`, `.js`, `.ts`, `.tsx` 파일이 Go parity 포팅, 삭제, 생성물 중 하나로 분류되고 source-to-Go 1:1 mapping·owner·test가 기록 |
+| 0. 기준선 | Python/Rust source inventory, migration manifest, API/데이터 모델 매핑, language-neutral golden fixture, 성능·오류 기준 수집 | `ui/` 밖 모든 `.py`, `.rs` 파일이 Go parity 포팅, 삭제, 생성물 중 하나로 분류되고 source-to-Go 1:1 mapping·owner·test가 기록 |
 | 1. parity 기반 | 원본 경로를 추적하는 Go module, config, HTTP/SSE, PostgreSQL, Redis, telemetry, auth parity 구현 | health와 가상 키 인증, trace 및 구조화 로그가 원본 계약과 Go test에서 동작 |
 | 2. P0 parity | chat/responses/embeddings, 1차 provider, routing, usage/spend의 파일 1:1 Go 구현 | 원본 test assertion 대응, contract suite 통과 및 shadow traffic 비교에서 허용 불일치 없음 |
 | 3. Enterprise parity | tenancy/RBAC, SSO, SCIM, budgets, audit, policy의 파일 1:1 Go 구현 | 권한 상승, tenant 경계, deprovisioning, budget race에 대한 원본 test 대응과 보안·통합 테스트 통과 |
-| 4. 전체 parity | P1 endpoint, 나머지 provider, Go SDK, callbacks/plugins, CLI, background job, Rust-only path 및 비-UI test/tooling | manifest의 모든 실행 항목이 Go parity 구현·Go test·owner·삭제 상태를 가지며 원본 기능 누락이 없음 |
+| 4. 전체 parity | P1 endpoint, 나머지 provider, Go SDK, callbacks/plugins, CLI, background job, Rust-only path 및 Python/Rust test/tooling | manifest의 모든 실행 항목이 Go parity 구현·Go test·owner·삭제 상태를 가지며 원본 기능 누락이 없음 |
 | 5. 대시보드 통합 | Go OpenAPI, UI API matrix, UI E2E 및 static asset 배포 | 현재 대시보드의 모든 화면이 Go parity API와 동작하고, generated API type 및 UI E2E 통과 |
 | 6. Go 구조 리팩터링 | parity 구현의 package 통합, 중복 제거, idiomatic Go API 정리 | refactor 전후 모든 Go contract/E2E/load test가 통과하고 public contract change가 없거나 versioned migration이 제공 |
-| 7. 최종 전환 | Python/Rust/비-UI JS/TS 제거, 신규 Enterprise 기능 | 모든 production traffic과 비-UI test/tooling이 리팩터링된 Go만 사용하며 원본 runtime, bridge, compatibility proxy, 비대시보드 source 제거 |
+| 7. 최종 전환 | Python/Rust 제거, 신규 Enterprise 기능 | 모든 production traffic과 Python/Rust test/tooling이 리팩터링된 Go만 사용하며 원본 runtime, bridge, compatibility proxy와 source 제거 |
 
 ## 11. 기능 요구사항과 수용 기준
 
@@ -193,9 +191,9 @@ Client / OpenAI SDK / Admin UI
 
 ### 전체 언어 전환 및 대시보드
 
-- 비-UI inventory의 각 실행 항목은 Go 구현 또는 삭제 근거, contract test, 부하 테스트 결과, 문서 및 원본 제거 변경을 연결해야 한다
+- Python/Rust inventory의 각 실행 항목은 Go 구현 또는 삭제 근거, contract test, 부하 테스트 결과, 문서 및 원본 제거 변경을 연결해야 한다
 - Go parity 단계의 각 항목은 원본 파일과 1:1 migration manifest mapping 및 대응 Go test가 있어야 한다. Go package 통합·파일 분할·중복 제거는 parity 완료 뒤의 별도 refactor change에서만 할 수 있다
-- 최종 production image와 Go test/tool image에는 Python runtime, Rust binary/toolchain, PyO3 bridge, Python compatibility proxy, Node.js runtime이 포함되지 않아야 한다. 단, 대시보드 build/serve image는 Node.js를 유지한다
+- 최종 production image와 Go test/tool image에는 Python runtime, Rust binary/toolchain, PyO3 bridge, Python compatibility proxy가 포함되지 않아야 한다. `ui/` 대시보드 build/serve image의 Node.js는 유지한다
 - 대시보드는 생성된 OpenAPI 타입과 Go server의 spec이 일치해야 하며, 지원 화면의 E2E test가 Go deployment를 대상으로 통과해야 한다
 - 대시보드가 저장하는 인증 정보는 현재 보안 지침대로 `localStorage`에 저장하지 않아야 한다
 
@@ -227,7 +225,7 @@ Client / OpenAI SDK / Admin UI
 
 | 리스크 | 대응 |
 | --- | --- |
-| 비-UI 전체 코드 전환의 범위와 누락 | inventory를 source path, 언어, public contract, Go owner, test, 삭제 상태까지 추적하고, 미분류 실행 경로는 완료로 선언하지 않음 |
+| Python/Rust 전환의 범위와 누락 | inventory를 source path, 언어, public contract, Go owner, test, 삭제 상태까지 추적하고, 미분류 실행 경로는 완료로 선언하지 않음 |
 | Rust 작업과 Go 전환의 중복 투자 | Rust를 동작 및 fixture의 참고 구현으로 분류하고, 새 Gateway 기능의 단일 소유자를 Go로 지정 |
 | Python callback/plugin 및 test/tool 의존 | Go native callback/plugin contract, Go CLI, Go test 또는 외부 webhook/event contract로 재구현하고, compatibility proxy는 임시 전환 수단으로만 사용 |
 | 비용/예산의 경쟁 조건 | DB 트랜잭션 또는 원자 카운터, idempotency, reconciliation job 및 보수적 hard-limit 정책 적용 |
@@ -241,7 +239,7 @@ Client / OpenAI SDK / Admin UI
 - Go Gateway/worker/SDK, container/Helm 배포물 및 운영 runbook
 - API·설정·DB compatibility matrix와 자동 contract test suite
 - [Python 코드의 Go 재개발 범위](./PYTHON_TO_GO_SCOPE.md), Python 기능군·Go package·test/tooling 제거 기준
-- [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), 비-UI 코드 inventory 및 제거 상태표
+- [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), Rust code inventory 및 제거 상태표
 - P0 Enterprise control plane, migration 및 rollback 도구
 - 정책-as-code, 감사 export, 예산 자동 조치에 대한 RFC와 구현·보안 테스트
-- 비-UI Python·Rust·JS/TS 경로별 Go 재개발/삭제 상태표, 제거 계획 및 Go SDK 도입 guide
+- Python·Rust 경로별 Go 재개발/삭제 상태표, 제거 계획 및 Go SDK 도입 guide
