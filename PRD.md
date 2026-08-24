@@ -4,6 +4,8 @@
 
 이 문서는 LiteLLM의 대시보드 외 모든 실행 코드와 테스트를 Go로 재개발하고, 기존 Next.js 대시보드는 유지하며, Enterprise 기능을 Go 플랫폼에 구현하기 위한 제품 범위, 우선순위, 호환성 기준 및 요구사항을 정의한다. 최종 제품 저장소에는 대시보드 이외의 Python·Rust·비대시보드 JavaScript/TypeScript 소스가 남지 않는다
 
+기능 누락 방지를 위한 구현 순서는 고정한다. 먼저 기존 Python/Rust의 기능 파일과 테스트를 1:1로 대응하는 Go parity 구현으로 완성한다. 그 뒤 별도 변경으로만 Go에 맞는 package 구조와 중복 제거를 리팩터링한다. parity 구현과 구조 리팩터링을 같은 변경에서 수행하지 않는다
+
 ## 2. 현황 및 근거
 
 2026-08-20 저장소 조사 기준:
@@ -68,7 +70,18 @@ Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go �
 
 대시보드와 UI 전용 테스트는 유지 대상이다. Terraform provider는 이미 Go로 구현되어 있어 새 Go API와의 호환성 검증·필요 시 수정 대상이다. Markdown, Helm, Terraform HCL, SQL migration, Docker/CI 설정은 실행 언어 전환 대상이 아닌 배포·운영 artifact로 유지한다
 
-### 6.2 Gateway 데이터면, P0
+### 6.2 파일 1:1 parity 전환 규칙
+
+1:1은 파일 이름이나 구현 문법을 기계적으로 복사한다는 뜻이 아니다. 각 기존 Python/Rust 실행 파일의 단일 책임, 공개 심볼, 입력·출력·오류·부작용, 그리고 연결된 테스트를 하나의 Go source/test 대응 항목으로 보존한다는 뜻이다
+
+- 단계 0에서 각 원본 파일에 `source_path`, `source_language`, `responsibility`, `public_contract`, `go_parity_path`, `go_test_path`, `status`, `owner`를 가진 migration manifest를 만든다
+- 실행 동작이 있는 원본 파일은 하나의 Go parity 파일에 대응한다. 빈 package marker, generated artifact, 중복 test helper, 폐기 기능은 포팅 대신 삭제할 수 있으나 근거와 대체 fixture 또는 삭제 승인 상태를 manifest에 남긴다
+- 원본 test의 assertion은 Go test로 1:1 대응한다. golden request/response는 JSON/YAML fixture로 분리해 언어 종속 helper를 제거한다
+- 원본 파일의 동작을 여러 Go 파일로 쪼개거나, 여러 원본 파일을 하나로 합치는 작업은 parity 단계에서 금지한다. 필요한 경우에도 parity 파일이 조합을 호출하도록 하며, 구조 통합은 리팩터링 단계로 미룬다
+- parity Go 파일은 원본과 추적 가능한 경로 및 migration ID를 갖는다. 최종 Go 구조는 이 ID와 test를 유지한 채 별도 refactor commit에서 변경한다
+- 새 기능은 parity 전환 중에 추가하지 않는다. 보안상 긴급한 수정만 별도 migration ID와 regression test를 추가할 수 있다
+
+### 6.3 Gateway 데이터면, P0
 
 - OpenAI 호환 API: health/readiness, models, chat completions, responses, embeddings
 - SSE 스트리밍, 요청 취소, context deadline 전파, 표준 오류 응답
@@ -79,7 +92,7 @@ Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go �
 - Redis 기반 rate limit, 캐시 및 분산 조정. PostgreSQL 영속화
 - 구조화 로그, Prometheus metrics, OpenTelemetry trace propagation 및 감사 이벤트 발행
 
-### 6.3 Gateway 확장, P1
+### 6.4 Gateway 확장, P1
 
 - Anthropic Messages 호환 API, audio transcription, image generation, rerank, batches, realtime/WebSocket
 - 공급자 어댑터 2차: Mistral, Cohere, Groq, Ollama/vLLM 및 OpenAI-compatible endpoint
@@ -87,7 +100,7 @@ Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go �
 - semantic cache, prompt 관리, 파일·벡터 스토어 프록시, MCP/A2A는 각각 독립 RFC 승인 뒤 추가
 - Python/Rust에서 아직 포팅되지 않은 경로는 전환 기간에만 compatibility proxy 모드로 위임한다. 이 위임은 관측 가능하고 설정으로 켜야 하며, 최종 출시 게이트 전에 source와 runtime을 함께 제거한다
 
-### 6.4 Enterprise 제어면, P0
+### 6.5 Enterprise 제어면, P0
 
 - 테넌시: organization, project, team, user, service account, virtual key의 명확한 소유 관계
 - RBAC: system admin, organization admin, project admin, team admin, developer, auditor, viewer 역할과 최소 권한 API
@@ -97,7 +110,7 @@ Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go �
 - 감사: 인증, 권한 거부, 관리 변경, 키 수명주기, 정책 변경, 모델 라우팅 결정, 비용 한도 조치 기록
 - 정책 엔진: 대상(조직·프로젝트·팀·키·모델), 상속, 우선순위, guardrail 및 라우팅 규칙 결합
 
-### 6.5 신규 Enterprise 기능, P1
+### 6.6 신규 Enterprise 기능, P1
 
 - 정책-as-code: Git 또는 API로 versioned policy bundle을 검증·승인·배포·롤백하고 적용 버전을 요청 및 감사 이벤트에 기록
 - 불변 감사 내보내기: 고객 소유 object storage 또는 SIEM으로 순서 보장된 서명 이벤트 배치를 내보내고 체크포인트로 누락과 변조를 탐지
@@ -151,14 +164,14 @@ Client / OpenAI SDK / Admin UI
 
 | 단계 | 제공 범위 | 완료 기준 |
 | --- | --- | --- |
-| 0. 기준선 | 비-UI source inventory, API/데이터 모델 매핑, language-neutral golden fixture, 성능·오류 기준 수집 | 모든 비-UI `.py`, `.rs`, `.js`, `.ts`, `.tsx` 파일이 Go 포팅, 삭제, 생성물 중 하나로 분류되고 P0 endpoint와 Enterprise API의 owner·요청 샘플·DB 영향·지원 여부가 기록 |
-| 1. 기반 | Go module, config, HTTP/SSE, PostgreSQL, Redis, telemetry, auth skeleton | health와 가상 키 인증, trace 및 구조화 로그가 배포 환경에서 동작 |
-| 2. P0 데이터면 | chat/responses/embeddings, 1차 provider, routing, usage/spend | contract suite 통과 및 shadow traffic 비교에서 허용 불일치 없음 |
-| 3. Enterprise P0 | tenancy/RBAC, SSO, SCIM, budgets, audit, policy | 권한 상승, tenant 경계, deprovisioning, budget race에 대한 보안·통합 테스트 통과 |
-| 4. 점진 전환 | shadow, canary, request-level rollback, compatibility proxy | 운영 대시보드에서 Python/Go 비교가 가능하고 tenant별 rollback이 즉시 가능 |
-| 5. 전체 기능 포팅 | P1 endpoint, 나머지 provider, Go SDK, callbacks/plugins, CLI, background job, Rust-only path 및 비-UI test/tooling | 비-UI inventory의 모든 실행 항목에 Go 구현, contract test, owner 및 제거 상태 기록 |
-| 6. 대시보드 통합 | Go OpenAPI, UI API matrix, UI E2E 및 static asset 배포 | 현재 대시보드의 모든 화면이 Go API와 동작하고, generated API type 및 UI E2E 통과 |
-| 7. 최종 전환 | 비-UI Python/Rust/JS/TS 제거, 신규 Enterprise 기능 | 모든 production traffic과 비-UI test/tooling이 Go만 사용하며 Python/Rust runtime, bridge, compatibility proxy, 비대시보드 JS/TS source 제거 |
+| 0. 기준선 | 비-UI source inventory, migration manifest, API/데이터 모델 매핑, language-neutral golden fixture, 성능·오류 기준 수집 | 모든 비-UI `.py`, `.rs`, `.js`, `.ts`, `.tsx` 파일이 Go parity 포팅, 삭제, 생성물 중 하나로 분류되고 source-to-Go 1:1 mapping·owner·test가 기록 |
+| 1. parity 기반 | 원본 경로를 추적하는 Go module, config, HTTP/SSE, PostgreSQL, Redis, telemetry, auth parity 구현 | health와 가상 키 인증, trace 및 구조화 로그가 원본 계약과 Go test에서 동작 |
+| 2. P0 parity | chat/responses/embeddings, 1차 provider, routing, usage/spend의 파일 1:1 Go 구현 | 원본 test assertion 대응, contract suite 통과 및 shadow traffic 비교에서 허용 불일치 없음 |
+| 3. Enterprise parity | tenancy/RBAC, SSO, SCIM, budgets, audit, policy의 파일 1:1 Go 구현 | 권한 상승, tenant 경계, deprovisioning, budget race에 대한 원본 test 대응과 보안·통합 테스트 통과 |
+| 4. 전체 parity | P1 endpoint, 나머지 provider, Go SDK, callbacks/plugins, CLI, background job, Rust-only path 및 비-UI test/tooling | manifest의 모든 실행 항목이 Go parity 구현·Go test·owner·삭제 상태를 가지며 원본 기능 누락이 없음 |
+| 5. 대시보드 통합 | Go OpenAPI, UI API matrix, UI E2E 및 static asset 배포 | 현재 대시보드의 모든 화면이 Go parity API와 동작하고, generated API type 및 UI E2E 통과 |
+| 6. Go 구조 리팩터링 | parity 구현의 package 통합, 중복 제거, idiomatic Go API 정리 | refactor 전후 모든 Go contract/E2E/load test가 통과하고 public contract change가 없거나 versioned migration이 제공 |
+| 7. 최종 전환 | Python/Rust/비-UI JS/TS 제거, 신규 Enterprise 기능 | 모든 production traffic과 비-UI test/tooling이 리팩터링된 Go만 사용하며 원본 runtime, bridge, compatibility proxy, 비대시보드 source 제거 |
 
 ## 11. 기능 요구사항과 수용 기준
 
@@ -181,6 +194,7 @@ Client / OpenAI SDK / Admin UI
 ### 전체 언어 전환 및 대시보드
 
 - 비-UI inventory의 각 실행 항목은 Go 구현 또는 삭제 근거, contract test, 부하 테스트 결과, 문서 및 원본 제거 변경을 연결해야 한다
+- Go parity 단계의 각 항목은 원본 파일과 1:1 migration manifest mapping 및 대응 Go test가 있어야 한다. Go package 통합·파일 분할·중복 제거는 parity 완료 뒤의 별도 refactor change에서만 할 수 있다
 - 최종 production image와 Go test/tool image에는 Python runtime, Rust binary/toolchain, PyO3 bridge, Python compatibility proxy, Node.js runtime이 포함되지 않아야 한다. 단, 대시보드 build/serve image는 Node.js를 유지한다
 - 대시보드는 생성된 OpenAPI 타입과 Go server의 spec이 일치해야 하며, 지원 화면의 E2E test가 Go deployment를 대상으로 통과해야 한다
 - 대시보드가 저장하는 인증 정보는 현재 보안 지침대로 `localStorage`에 저장하지 않아야 한다

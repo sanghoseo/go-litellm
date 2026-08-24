@@ -4,6 +4,8 @@
 
 이 문서는 `litellm-rust/`의 현재 구현 범위를 확인하고, 대시보드를 제외한 모든 코드를 Go로 재개발하는 최종 전환에서 각 Rust 기능을 어떤 Go 구성요소로 대체할지 정의한다. 이 문서는 Rust 코드를 기계적으로 번역하기 위한 문서가 아니다. 공개 계약과 운영 동작을 보존하면서 Python·Rust 의존성을 제거하기 위한 inventory다
 
+Rust도 Python과 동일하게 먼저 파일 책임과 test assertion을 1:1 Go parity 구현으로 대응한다. Go package 통합·파일 분할·중복 제거는 parity gate 통과 후 별도의 refactor 단계에서만 수행한다
+
 ## 조사 기준
 
 2026-08-24 기준 Rust workspace는 세 크레이트로 구성된다
@@ -139,6 +141,7 @@ Bedrock 경로는 AWS SDK for Go v2의 default credential chain과 SigV4 signer�
 ## 완료 게이트
 
 - `litellm-rust/`의 모든 runtime·test·tooling 파일은 Go package/test 또는 명시적 제거 사유와 연결되어야 한다
+- `port` Rust 파일은 원본 source 1개, Go parity source 1개, 대응 Go test와 migration ID를 가져야 한다. parity 단계에서 원본 책임을 합치거나 분할하지 않는다
 - 각 Go route/provider는 Python과 Rust fixture에 대해 request serialization, response normalization, status/error, header, stream/WebSocket frame, usage/cost event를 비교해야 한다
 - Go Gateway는 YAML을 직접 파싱하며 Python interpreter, PyO3, Rust binary를 포함하지 않아야 한다. 대시보드 외 CI/test/tool image도 Go toolchain만 사용해야 한다
 - callback/spend/audit이 Go PostgreSQL outbox와 worker에서 동작하고 Python Proxy callback API 호출이 없어야 한다

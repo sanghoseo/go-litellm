@@ -6,6 +6,8 @@
 
 이 문서는 Python 파일을 줄 단위로 번역하라는 의미가 아니다. Python 구현이 제공하는 공개 계약, provider 동작, 운영 기능, 데이터 의미론을 Go의 단순하고 강타입인 설계로 재구현한다
 
+다만 기능 누락을 막기 위해 구현 순서는 두 단계로 엄격히 분리한다. 먼저 Python 파일의 책임과 테스트를 1:1로 대응하는 Go parity 파일로 재개발한다. 모든 mapping과 Go test가 완료된 뒤, 별도 리팩터링 단계에서만 Go에 맞는 package 통합, 파일 분할, 중복 제거를 수행한다
+
 ## 기준과 범위 규칙
 
 2026-08-24 기준 저장소에는 추적된 Python 파일이 5,277개 있다. 이 중 주요 실행 범위는 다음과 같다
@@ -30,6 +32,36 @@
 - `ui/litellm-dashboard/`의 Next.js/React/TypeScript 코드와 UI 전용 Playwright 테스트
 - Markdown, YAML, JSON, SQL, HCL, Helm chart, Dockerfile와 같이 실행 언어가 아닌 설정·문서 artifact
 - 기능의 source-of-truth가 아닌 generated asset, 오래된 example, 중복 test/tool. 이들은 Go로 포팅하지 않고 단계 0 inventory에서 삭제 근거를 기록한다
+
+## 파일 1:1 parity migration contract
+
+각 Python 파일은 migration manifest에서 아래 중 하나의 종료 상태를 가져야 한다
+
+| 상태 | 적용 대상 | 필수 증거 |
+| --- | --- | --- |
+| `port` | 실행 동작, public API, test, CLI, script, provider transform | 원본 파일 1개와 Go parity source 1개, Go test, contract fixture, owner |
+| `delete-generated` | 빌드 결과물, vendored/generated output | source-of-truth와 재생성 또는 삭제 근거 |
+| `delete-duplicate` | 동일 기능의 중복 helper/test/example | 대체 Go path와 behavior가 중복임을 보이는 근거 |
+| `retire-feature` | 지원 종료가 승인된 experimental 기능 | 제품 승인, API/문서 제거, migration 안내 |
+
+`port` 상태의 필수 필드는 다음과 같다
+
+```text
+source_path: litellm/proxy/auth/user_api_key_auth.py
+source_language: python
+responsibility: virtual-key authentication and scope resolution
+public_contract: proxy authentication behavior and error fixture IDs
+go_parity_path: internal/parity/litellm/proxy/auth/user_api_key_auth.go
+go_test_path: internal/parity/litellm/proxy/auth/user_api_key_auth_test.go
+status: parity-passing
+owner: <team or individual>
+```
+
+- `go_parity_path`는 원본 경로와 이름을 추적할 수 있어야 한다. Go package 문법상 필요한 이름 조정은 허용하지만 mapping ID 없이 책임을 합치거나 분할할 수 없다
+- 원본 Python source 하나는 parity 단계에서 하나의 Go source 책임으로 대응한다. 원본 test 하나도 하나의 Go test file 또는 명시된 Go subtest set으로 대응한다
+- Python assertion은 가능한 한 그대로 Go assertion으로 옮기고, request/response fixture는 JSON/YAML로 추출한다
+- parity 단계에서는 behavior 변경, 새 feature, Go다운 package 통합을 금지한다. 보안상 긴급 변경은 별도 manifest ID와 regression test로 기록한다
+- parity 완료 뒤 refactor를 시작한다. refactor는 migration ID와 Go test를 유지하며, public contract가 바뀌면 별도의 versioned API migration으로 처리한다
 
 ## Go 목표 구조
 
@@ -56,7 +88,7 @@ internal/
   enterprise/     Commercially licensed Enterprise capabilities
 ```
 
-`internal/`의 경계는 Go의 컴파일 경계로 강제한다. HTTP handler, provider transform, DB repository, callback delivery가 서로 직접 섞이지 않도록 한다
+parity 단계에서는 `internal/parity/` 아래에 원본 책임을 추적하는 Go 파일을 둔다. 이 단계의 구조는 임시이며, parity 완료 뒤 `internal/`의 domain package로 이동한다. 최종 구조에서는 HTTP handler, provider transform, DB repository, callback delivery가 서로 직접 섞이지 않도록 Go의 컴파일 경계로 강제한다
 
 ## Python 기능군별 Go 재개발 범위
 
@@ -143,12 +175,12 @@ internal/
 
 | 단계 | Go 재개발 범위 | 종료 기준 |
 | --- | --- | --- |
-| 0. Inventory | 모든 Python 파일을 product, test/tool, generated, delete로 분류 | source path, public contract, Go owner, test, delete decision이 기록 |
-| 1. Foundation | config, errors, types, auth, storage, cache, telemetry, test fixture framework | Go Gateway가 PostgreSQL/Redis 선택 모드에서 기동 |
-| 2. Core gateway | chat/responses/embeddings, OpenAI/Anthropic/Azure/Bedrock/Gemini, routing, usage | P0 API contract와 streaming을 Go-only로 검증 |
-| 3. Enterprise | tenancy, key, RBAC, budget, audit, policy, SSO/SCIM, dashboard API | 대시보드와 Terraform E2E가 Go backend에서 통과 |
-| 4. Full feature | 나머지 provider, endpoint, integration, cache, secret, extension | 지원 기능에 Python module이 남지 않음 |
-| 5. Tooling/test | Go SDK/CLI, Go test/E2E/load, migration/tool, examples | Python-based build/test/release path 제거 |
+| 0. Inventory | 모든 Python 파일을 `port`, generated, duplicate, retire로 분류하고 1:1 manifest 생성 | source path, responsibility, public contract, Go parity source/test, owner, status가 기록 |
+| 1. Foundation parity | config, errors, types, auth, storage, cache, telemetry, test fixture framework의 1:1 Go 구현 | Go Gateway가 PostgreSQL/Redis 선택 모드에서 기동하고 원본 test assertion 대응 |
+| 2. Core gateway parity | chat/responses/embeddings, OpenAI/Anthropic/Azure/Bedrock/Gemini, routing, usage의 1:1 Go 구현 | P0 API contract와 streaming, Python test 대응을 Go-only로 검증 |
+| 3. Enterprise parity | tenancy, key, RBAC, budget, audit, policy, SSO/SCIM, dashboard API의 1:1 Go 구현 | 대시보드와 Terraform E2E, 원본 Enterprise test 대응이 Go backend에서 통과 |
+| 4. Full parity | 나머지 provider, endpoint, integration, cache, secret, extension, SDK/CLI/tooling/test | `port` 상태의 모든 Python source에 Go parity source/test가 있고, 기능 누락이 없음 |
+| 5. Refactor | Go package 통합, shared abstraction, file split/merge, duplicate removal | refactor 전후 Go contract/E2E/load test 통과, public behavior 불변 |
 | 6. Removal | Python package, dependencies, images, CI, packaging 제거 | `ui/litellm-dashboard/` 밖 Python source와 Python runtime 의존이 0 |
 
 ## 최종 검증 게이트
@@ -156,6 +188,7 @@ internal/
 - `git ls-files` 기준 `ui/litellm-dashboard/` 밖에 Python source가 없다. 예외가 필요한 데이터 fixture는 `.py`가 아닌 JSON/YAML/SQL로 변환한다
 - production image, Go SDK/CLI image, Go test/tool image에 Python interpreter, `pip`, Python wheel, PyO3 bridge가 없다
 - 모든 지원 provider/endpoint에는 Go implementation, contract test, owner가 있다
+- 모든 `port` Python 파일에는 source-to-Go parity mapping, Go parity test, parity-passing 상태가 있다. refactor는 이 gate 뒤에만 시작하고, refactor 전후 mapping ID와 contract fixture를 유지한다
 - Enterprise 기능과 dashboard 관리 화면이 Go backend와 PostgreSQL/Redis 또는 standalone 실행 모드에서 문서화된 방식으로 동작한다
 - CI는 Go build, Go test, Go E2E/load test, dashboard UI test만 실행하고 `pytest` 또는 Python script에 의존하지 않는다
 - compatibility proxy는 종료 전에 제거하며, final Go-only canary가 운영 SLO를 충족해야 한다
