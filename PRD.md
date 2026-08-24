@@ -226,6 +226,7 @@ Client / OpenAI SDK / Admin UI
 
 - Go Gateway/worker/SDK, container/Helm 배포물 및 운영 runbook
 - API·설정·DB compatibility matrix와 자동 contract test suite
+- [Python 코드의 Go 재개발 범위](./PYTHON_TO_GO_SCOPE.md), Python 기능군·Go package·test/tooling 제거 기준
 - [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), 비-UI 코드 inventory 및 제거 상태표
 - P0 Enterprise control plane, migration 및 rollback 도구
 - 정책-as-code, 감사 export, 예산 자동 조치에 대한 RFC와 구현·보안 테스트
