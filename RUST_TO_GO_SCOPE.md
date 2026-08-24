@@ -2,7 +2,7 @@
 
 ## 목적
 
-이 문서는 `litellm-rust/`의 현재 구현 범위를 확인하고, 최종 Go 단일 런타임 전환에서 각 Rust 기능을 어떤 Go 구성요소로 대체할지 정의한다. 이 문서는 Rust 코드를 기계적으로 번역하기 위한 문서가 아니다. 공개 계약과 운영 동작을 보존하면서 Python·Rust 의존성을 제거하기 위한 inventory다
+이 문서는 `litellm-rust/`의 현재 구현 범위를 확인하고, 대시보드를 제외한 모든 코드를 Go로 재개발하는 최종 전환에서 각 Rust 기능을 어떤 Go 구성요소로 대체할지 정의한다. 이 문서는 Rust 코드를 기계적으로 번역하기 위한 문서가 아니다. 공개 계약과 운영 동작을 보존하면서 Python·Rust 의존성을 제거하기 위한 inventory다
 
 ## 조사 기준
 
@@ -14,7 +14,7 @@
 | `litellm-ai-gateway` | 46 파일, 약 6,942 LOC | Axum HTTP/WS host, realtime, OCR/transcription legacy host 경로, auth, callback integration | `cmd/gateway`, `internal/httpapi`, `internal/realtime`, `internal/auth`, `internal/hooks`, `internal/observability` |
 | `litellm-python-bridge` | 3 파일, 약 489 LOC | PyO3 변환, Python sync/async wrapper, GIL release | 제거. Go SDK 또는 Go Gateway HTTP API로 대체 |
 
-Rust 테스트 표시는 약 33개 파일, 164개의 `test` attribute가 있다. 이 테스트와 Python parity/E2E 테스트는 Go contract test의 초기 fixture와 acceptance source로 사용한다
+Rust 테스트 표시는 약 33개 파일, 164개의 `test` attribute가 있다. 이 테스트와 Python parity/E2E 테스트의 assertion을 language-neutral fixture로 추출한 뒤 `go test`로 재작성한다. 대시보드 UI 테스트를 제외한 Python/Rust test source는 최종 저장소에서 제거한다
 
 ## 현재 의존성과 전환 원칙
 
@@ -36,10 +36,10 @@ auth -> policy -> routing -> provider HTTP/WS -> usage/audit outbox
 PostgreSQL + Redis/Valkey
 ```
 
-- Rust의 provider 변환, protocol 규칙, error mapping, request/response fixture는 보존 대상이다
+- Rust의 provider 변환, protocol 규칙, error mapping, request/response fixture는 Go 재구현 대상이다
 - PyO3, GIL, embedded Python config reader, Python Proxy callback API는 보존 대상이 아니라 제거 대상이다
 - 현재 Rust가 Python에 위임하는 config, rollout, fallback, spend tracking, callback은 Go Gateway/Worker의 native 기능으로 옮긴다
-- Go 구현의 완료 기준은 Rust 구현의 존재가 아니라 Python/Rust 기준과의 contract test 통과 및 production Go-only deployment다
+- Go 구현의 완료 기준은 Rust 구현의 존재가 아니라 Python/Rust 기준과의 contract test 통과, 기존 비-UI test/tooling의 Go 재작성, 그리고 production Go-only deployment다
 
 ## 기능별 inventory 및 Go 매핑
 
@@ -105,7 +105,7 @@ Go 최종 전환에서는 이 bridge를 포팅하지 않는다. 다음처럼 대
 | GIL release | 불필요. 요청 context와 goroutine cancellation으로 대체 |
 | Python bridge unavailable fallback | 단계적 배포에서는 Go endpoint canary/rollback으로 대체. 최종에는 제거 |
 
-Python 경로 `litellm/rust_bridge/` 및 `litellm/ocr/main.py`, `litellm/llms/custom_httpx/llm_http_handler.py`에 Rust bridge 선택, feature flag, fallback 코드가 존재한다. 해당 Python 경로도 Go 전환 완료 시 함께 제거하거나 Go SDK migration guide로 대체해야 한다
+Python 경로 `litellm/rust_bridge/` 및 `litellm/ocr/main.py`, `litellm/llms/custom_httpx/llm_http_handler.py`에 Rust bridge 선택, feature flag, fallback 코드가 존재한다. 해당 Python 경로와 그 테스트는 Go 구현 및 Go test로 대체한 뒤 저장소에서 제거해야 한다
 
 ## Go에서 재설계해야 하는 항목
 
@@ -127,20 +127,20 @@ Bedrock 경로는 AWS SDK for Go v2의 default credential chain과 SigV4 signer�
 
 ## 포팅 순서
 
-1. route와 Python bridge 진입점, Rust feature flag, provider 변환, 테스트 fixture를 포함한 상세 inventory를 자동화한다
+1. route와 Python bridge 진입점, Rust feature flag, provider 변환, 테스트 assertion을 포함한 상세 inventory를 자동화하고 language-neutral fixture를 만든다
 2. Go shared foundation을 만든다: config, typed error, HTTP client, auth, request context, telemetry, PostgreSQL outbox, Redis/Valkey abstraction
 3. `messages`와 Anthropic/Azure AI provider path를 Go로 구현하고 Python/Rust/Go contract test를 통과시킨다
 4. `responses`와 realtime WebSocket을 구현한다. normal close, upstream error, cancellation, warm-pool concurrency를 우선 검증한다
 5. OCR, audio transcription, Bedrock SigV4, Azure AI, Mistral, Vertex AI를 구현한다
 6. Go native hooks, guardrails, logging, spend, audit를 구현하고 Python Proxy callback API 의존을 제거한다
 7. Go native YAML config와 full router/fallback strategy를 구현하고 embedded Python config reader를 제거한다
-8. Python bridge와 Rust binary/container, feature flag, compatibility callback을 제거한다
+8. Python bridge와 Rust binary/container, feature flag, compatibility callback, Python/Rust test·tooling source를 제거한다
 
 ## 완료 게이트
 
-- `litellm-rust/`의 모든 런타임 파일은 Go package 또는 명시적 제거 사유와 연결되어야 한다
+- `litellm-rust/`의 모든 runtime·test·tooling 파일은 Go package/test 또는 명시적 제거 사유와 연결되어야 한다
 - 각 Go route/provider는 Python과 Rust fixture에 대해 request serialization, response normalization, status/error, header, stream/WebSocket frame, usage/cost event를 비교해야 한다
-- Go Gateway는 YAML을 직접 파싱하며 Python interpreter, PyO3, Rust binary를 포함하지 않아야 한다
+- Go Gateway는 YAML을 직접 파싱하며 Python interpreter, PyO3, Rust binary를 포함하지 않아야 한다. 대시보드 외 CI/test/tool image도 Go toolchain만 사용해야 한다
 - callback/spend/audit이 Go PostgreSQL outbox와 worker에서 동작하고 Python Proxy callback API 호출이 없어야 한다
 - existing dashboard 및 Terraform provider E2E가 Go backend에서 통과해야 한다
 - production Go-only canary가 Rust/bridge fallback 없이 운영 SLO를 충족한 뒤 Rust runtime artifact를 제거한다

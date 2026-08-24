@@ -1,14 +1,15 @@
-# LiteLLM 전체 Go 전환 및 Enterprise 기능 PRD
+# LiteLLM 비-UI 전체 Go 재개발 및 Enterprise 기능 PRD
 
 ## 1. 문서 목적
 
-이 문서는 LiteLLM의 Python 및 Rust 런타임 코드를 모두 Go로 전환하고, 기존 대시보드는 유지하며, Enterprise 기능을 Go 플랫폼에 구현하기 위한 제품 범위, 우선순위, 호환성 기준 및 요구사항을 정의한다. 구현 범위를 먼저 고정해 점진적 전환이 새로운 기능 개발과 기존 고객 워크로드의 안정성을 훼손하지 않도록 한다
+이 문서는 LiteLLM의 대시보드 외 모든 실행 코드와 테스트를 Go로 재개발하고, 기존 Next.js 대시보드는 유지하며, Enterprise 기능을 Go 플랫폼에 구현하기 위한 제품 범위, 우선순위, 호환성 기준 및 요구사항을 정의한다. 최종 제품 저장소에는 대시보드 이외의 Python·Rust·비대시보드 JavaScript/TypeScript 소스가 남지 않는다
 
 ## 2. 현황 및 근거
 
 2026-08-20 저장소 조사 기준:
 
-- Python 소스는 5,277개 파일이며, `litellm/`에는 3,401개의 추적 경로가 있다
+- 추적된 Python 파일은 5,277개, Rust 파일은 110개다. Enterprise 하위에는 Python 파일 149개가 있다
+- 대시보드 밖 JavaScript/TypeScript 파일은 296개가 있으나, 이 중 상당수는 experimental 경로의 생성된 정적 asset이다. 단계 0에서 source, generated artifact, 삭제 대상으로 구분한다
 - Python Proxy에는 약 757개의 HTTP 라우트 선언이 있으며, 관리, 인증, 비용, 관측성, OpenAI 호환 API 등 넓은 표면적을 가진다
 - `litellm/llms/`에는 100개가 넘는 공급자 어댑터가 있다
 - Rust 워크스페이스는 `core`, `ai-gateway`, `python-bridge` 크레이트로 분리되어 있고, messages, responses, audio transcription, OCR, realtime 및 일부 OpenAI, Anthropic, Bedrock, Azure AI, Vertex AI, Mistral 경로를 단계적으로 구현 중이다. 구성, 재시도, 라우팅 정책, 로깅, 비용 추적, 고객 플러그인은 여전히 Python이 담당한다. Rust 런타임도 최종적으로 Go 구현으로 대체 대상이다
@@ -20,17 +21,17 @@
 
 ## 3. 제품 비전
 
-Go 기반 LiteLLM 플랫폼을 단일 런타임 언어로 제공한다. Go 서비스는 현재 Python SDK·Proxy·관리 API·백그라운드 작업·Rust core/bridge/gateway가 제공하는 런타임 동작을 모두 대체한다. 기존 Next.js 대시보드는 별도 프런트엔드로 유지하며, Go API의 호환 계약을 통해 같은 기능을 계속 제공한다. Enterprise 고객은 중앙 인증, 세분화된 권한, 정책 집행, 비용 통제 및 감사를 기본 기능으로 사용해야 한다
+Go 기반 LiteLLM 플랫폼을 비-UI 단일 구현 언어로 제공한다. Go 서비스와 Go SDK는 현재 Python SDK·Proxy·관리 API·CLI·백그라운드 작업·테스트·Rust core/bridge/gateway가 제공하는 동작을 모두 대체한다. 기존 Next.js 대시보드는 유일한 UI 예외로 유지하며, Go API의 호환 계약을 통해 같은 기능을 계속 제공한다. Enterprise 고객은 중앙 인증, 세분화된 권한, 정책 집행, 비용 통제 및 감사를 기본 기능으로 사용해야 한다
 
 ## 4. 목표와 비목표
 
 ### 목표
 
-1. Python과 Rust의 모든 프로덕션 런타임 기능을 Go 구현으로 대체한다
+1. `ui/litellm-dashboard/`를 제외한 모든 실행 코드와 테스트를 Go 구현 또는 비코드 설정으로 대체한다
 2. 기존 Python Proxy와 Rust 서비스를 병행 실행하면서 요청 단위로 안전하게 Go로 전환한다
 3. 모든 지원 endpoint와 공급자에 대해 요청·응답·스트리밍·오류 의미론의 호환성을 보장한다
 4. Enterprise 핵심 제어면을 Go 서비스에 포함한다: 조직·프로젝트·팀·사용자·가상 키, RBAC, SSO, SCIM, 예산, 감사 로그 및 정책 기반 Guardrail 적용
-5. 현재 Next.js 대시보드를 유지하고, 대시보드가 소비하는 API·인증·정적 asset 배포 계약을 보장한다
+5. 현재 Next.js 대시보드와 그 TypeScript UI 테스트를 유지하고, 대시보드가 소비하는 API·인증·정적 asset 배포 계약을 보장한다
 6. 운영 데이터의 PostgreSQL 및 Redis 계약을 명시하고, 기존 배포·Terraform·관리 UI와 연동한다
 7. 새 Enterprise 기능으로 정책-as-code 배포, 불변 감사 내보내기, 예산 임계치 자동 조치를 제공한다
 
@@ -38,8 +39,8 @@ Go 기반 LiteLLM 플랫폼을 단일 런타임 언어로 제공한다. Go 서�
 
 - 대시보드를 Go 또는 다른 프런트엔드 기술로 재작성하지 않는다. 현재 Next.js/React/TypeScript 대시보드를 유지한다
 - 현재 Rust 코드의 기계적 포팅을 목표로 하지 않는다. 검증된 동작과 공개 계약을 기준으로 Go 설계를 새로 만든다
-- 최종 상태에서 Python 또는 Rust 런타임을 요청 처리, SDK, background worker, provider adapter 또는 plugin 실행에 요구하지 않는다
-- Python 또는 Rust 소스의 문서, 테스트 fixture, migration reference 보관은 런타임 의존성과 구분한다
+- 최종 상태에서 `ui/litellm-dashboard/` 밖의 Python, Rust, JavaScript, TypeScript 실행 소스를 요청 처리, SDK, CLI, worker, provider adapter, plugin 또는 테스트에 요구하지 않는다
+- YAML, JSON, SQL, HCL, Dockerfile, Helm chart, Markdown 및 대시보드의 TypeScript/TSX는 Go 코드 전환 대상이 아니다. 기존 Python/Rust/비대시보드 JS/TS의 동작은 Go로 재구현하거나 생성물·중복물은 삭제한다
 - Enterprise 라이선스 코드를 오픈소스 경로로 복사하거나 상업 라이선스 경계를 변경하지 않는다
 
 ## 5. 사용자와 핵심 시나리오
@@ -56,14 +57,16 @@ Go 기반 LiteLLM 플랫폼을 단일 런타임 언어로 제공한다. Go 서�
 
 ### 6.1 최종 전환 범위
 
-최종 전환 범위는 `litellm/`, `litellm-rust/`, `enterprise/`에 있는 Python·Rust 프로덕션 코드를 Go로 재구현하는 것이다. 다음 항목을 포함한다:
+최종 전환 범위는 `ui/litellm-dashboard/`를 제외한 실행 코드 전체다. `litellm/`, `litellm-rust/`, `enterprise/`, `backend/`, `gateway/`, `litellm-proxy-extras/`, `scripts/`, `cookbook/`, `tests/`에 있는 Python·Rust·비대시보드 JS/TS 코드는 Go로 재구현하거나 삭제한다. 다음 항목을 포함한다:
 
 - Python SDK의 동기/비동기 public API, typed model, configuration, retry, callback, caching, router, secret manager, provider transform 및 모든 지원 endpoint
 - Proxy의 공개/관리/Enterprise API, 인증·권한, policy, guardrail, spend tracking, DB transaction queue, health, background job, webhook 및 observability 경로
 - Rust `core`, `ai-gateway`, `python-bridge`의 route, provider, routing, realtime 및 bridge 기능
 - 상업 라이선스 경계 안의 Enterprise 런타임 기능. 라이선스 경계 자체는 유지한다
+- Python/Rust unit·integration·E2E·load test, local mock server, CLI, migration/maintenance script. UI 전용 Playwright/TypeScript 테스트는 대시보드 유지 범위에 속한다
+- `litellm/proxy/_experimental/out/`처럼 생성된 비대시보드 JavaScript bundle은 Go로 포팅하지 않고 source-of-truth를 확인한 뒤 재생성하거나 삭제한다
 
-대시보드와 Terraform provider는 Go 전환 대상이 아니다. 대시보드는 유지 대상이고, Terraform provider는 기존 Go 코드로서 새 Go API와의 호환성 검증 대상이다
+대시보드와 UI 전용 테스트는 유지 대상이다. Terraform provider는 이미 Go로 구현되어 있어 새 Go API와의 호환성 검증·필요 시 수정 대상이다. Markdown, Helm, Terraform HCL, SQL migration, Docker/CI 설정은 실행 언어 전환 대상이 아닌 배포·운영 artifact로 유지한다
 
 ### 6.2 Gateway 데이터면, P0
 
@@ -82,7 +85,7 @@ Go 기반 LiteLLM 플랫폼을 단일 런타임 언어로 제공한다. Go 서�
 - 공급자 어댑터 2차: Mistral, Cohere, Groq, Ollama/vLLM 및 OpenAI-compatible endpoint
 - 요청/응답 Guardrail 훅과 정책 상속
 - semantic cache, prompt 관리, 파일·벡터 스토어 프록시, MCP/A2A는 각각 독립 RFC 승인 뒤 추가
-- Python/Rust에서 아직 포팅되지 않은 경로는 전환 기간에만 compatibility proxy 모드로 위임한다. 이 위임은 관측 가능하고 설정으로 켜야 하며, 최종 출시 게이트 전에 제거한다
+- Python/Rust에서 아직 포팅되지 않은 경로는 전환 기간에만 compatibility proxy 모드로 위임한다. 이 위임은 관측 가능하고 설정으로 켜야 하며, 최종 출시 게이트 전에 source와 runtime을 함께 제거한다
 
 ### 6.4 Enterprise 제어면, P0
 
@@ -142,20 +145,20 @@ Client / OpenAI SDK / Admin UI
 - PostgreSQL은 source of truth, Redis는 TTL 상태, rate limit, cache 및 저지연 카운터 용도로만 사용한다
 - 관리 변경과 사용량 업데이트는 idempotency key와 transactional outbox를 사용한다
 - Enterprise 전용 코드는 명확한 라이선스 패키지 및 빌드 배포 경계에 둔다. OSS 바이너리는 Enterprise 권한 우회를 포함하지 않는다
-- Python SDK를 대체하는 Go SDK는 별도 Go module로 배포하되, Go Gateway의 domain type과 transport contract를 공유한다. Python SDK 호환이 필요한 사용자는 전환 기간에 generated client 또는 별도 migration path를 사용하고, Python 실행은 Go 서비스에 포함하지 않는다
+- 기존 Python SDK는 Go SDK로 대체한다. Go SDK는 별도 Go module로 배포하되, Go Gateway의 domain type과 transport contract를 공유한다. Python SDK 호환 계층이나 generated Python client는 최종 제품 범위에 포함하지 않는다
 
 ## 10. 마이그레이션 단계 및 완료 기준
 
 | 단계 | 제공 범위 | 완료 기준 |
 | --- | --- | --- |
-| 0. 기준선 | API inventory, 데이터 모델 매핑, golden fixtures, 성능·오류 기준 수집 | P0 endpoint와 Enterprise API의 owner, 요청 샘플, DB 영향, 지원 여부가 inventory에 기록 |
+| 0. 기준선 | 비-UI source inventory, API/데이터 모델 매핑, language-neutral golden fixture, 성능·오류 기준 수집 | 모든 비-UI `.py`, `.rs`, `.js`, `.ts`, `.tsx` 파일이 Go 포팅, 삭제, 생성물 중 하나로 분류되고 P0 endpoint와 Enterprise API의 owner·요청 샘플·DB 영향·지원 여부가 기록 |
 | 1. 기반 | Go module, config, HTTP/SSE, PostgreSQL, Redis, telemetry, auth skeleton | health와 가상 키 인증, trace 및 구조화 로그가 배포 환경에서 동작 |
 | 2. P0 데이터면 | chat/responses/embeddings, 1차 provider, routing, usage/spend | contract suite 통과 및 shadow traffic 비교에서 허용 불일치 없음 |
 | 3. Enterprise P0 | tenancy/RBAC, SSO, SCIM, budgets, audit, policy | 권한 상승, tenant 경계, deprovisioning, budget race에 대한 보안·통합 테스트 통과 |
 | 4. 점진 전환 | shadow, canary, request-level rollback, compatibility proxy | 운영 대시보드에서 Python/Go 비교가 가능하고 tenant별 rollback이 즉시 가능 |
-| 5. 전체 기능 포팅 | P1 endpoint, 나머지 provider, SDK, callbacks/plugins, background job 및 Rust-only path | Python/Rust inventory의 모든 런타임 항목에 Go 구현, contract test, owner 및 제거 상태 기록 |
+| 5. 전체 기능 포팅 | P1 endpoint, 나머지 provider, Go SDK, callbacks/plugins, CLI, background job, Rust-only path 및 비-UI test/tooling | 비-UI inventory의 모든 실행 항목에 Go 구현, contract test, owner 및 제거 상태 기록 |
 | 6. 대시보드 통합 | Go OpenAPI, UI API matrix, UI E2E 및 static asset 배포 | 현재 대시보드의 모든 화면이 Go API와 동작하고, generated API type 및 UI E2E 통과 |
-| 7. 최종 전환 | Python/Rust 런타임 제거, 신규 Enterprise 기능 | 모든 production traffic이 Go에만 도달하고 Python/Rust runtime container·bridge·compatibility proxy 제거 |
+| 7. 최종 전환 | 비-UI Python/Rust/JS/TS 제거, 신규 Enterprise 기능 | 모든 production traffic과 비-UI test/tooling이 Go만 사용하며 Python/Rust runtime, bridge, compatibility proxy, 비대시보드 JS/TS source 제거 |
 
 ## 11. 기능 요구사항과 수용 기준
 
@@ -177,8 +180,8 @@ Client / OpenAI SDK / Admin UI
 
 ### 전체 언어 전환 및 대시보드
 
-- Python/Rust inventory의 각 프로덕션 항목은 Go 구현, contract test, 부하 테스트 결과, 문서 및 Python/Rust 제거 PR을 연결해야 한다
-- 최종 production image에는 Python runtime, Rust binary, PyO3 bridge 또는 Python compatibility proxy가 포함되지 않아야 한다
+- 비-UI inventory의 각 실행 항목은 Go 구현 또는 삭제 근거, contract test, 부하 테스트 결과, 문서 및 원본 제거 변경을 연결해야 한다
+- 최종 production image와 Go test/tool image에는 Python runtime, Rust binary/toolchain, PyO3 bridge, Python compatibility proxy, Node.js runtime이 포함되지 않아야 한다. 단, 대시보드 build/serve image는 Node.js를 유지한다
 - 대시보드는 생성된 OpenAPI 타입과 Go server의 spec이 일치해야 하며, 지원 화면의 E2E test가 Go deployment를 대상으로 통과해야 한다
 - 대시보드가 저장하는 인증 정보는 현재 보안 지침대로 `localStorage`에 저장하지 않아야 한다
 
@@ -199,7 +202,7 @@ Client / OpenAI SDK / Admin UI
 
 ## 14. 테스트 및 출시 게이트
 
-- API contract: Python/Rust 기준과 Go 후보 간 fixture 및 실제 provider sandbox/계정 기반 비교
+- API contract: 현재 Python/Rust 기준과 Go 후보 간 language-neutral fixture 및 실제 provider sandbox/계정 기반 비교. 기존 Python/Rust test는 Go test로 재작성한다
 - 통합: PostgreSQL, Redis, OIDC test provider, SCIM client, object storage/SIEM exporter, 1차 provider별 성공·오류·timeout·streaming 검증
 - 보안: tenant isolation, RBAC, key rotation/revocation, forged JWT, SCIM replay, budget concurrency, policy bypass, audit tampering 검증
 - 회귀: 현재 Next.js 관리 대시보드와 Terraform provider의 전체 지원 흐름을 Go API에 대한 E2E로 검증
@@ -210,20 +213,20 @@ Client / OpenAI SDK / Admin UI
 
 | 리스크 | 대응 |
 | --- | --- |
-| 전체 Python/Rust 기능 전환의 범위와 누락 | inventory를 source path, public contract, Go owner, test, 삭제 상태까지 추적하고, 미분류 런타임 경로는 완료로 선언하지 않음 |
+| 비-UI 전체 코드 전환의 범위와 누락 | inventory를 source path, 언어, public contract, Go owner, test, 삭제 상태까지 추적하고, 미분류 실행 경로는 완료로 선언하지 않음 |
 | Rust 작업과 Go 전환의 중복 투자 | Rust를 동작 및 fixture의 참고 구현으로 분류하고, 새 Gateway 기능의 단일 소유자를 Go로 지정 |
-| Python callback/plugin 의존 | Go native callback/plugin contract 또는 외부 webhook/event contract로 재구현하고, compatibility proxy는 임시 전환 수단으로만 사용 |
+| Python callback/plugin 및 test/tool 의존 | Go native callback/plugin contract, Go CLI, Go test 또는 외부 webhook/event contract로 재구현하고, compatibility proxy는 임시 전환 수단으로만 사용 |
 | 비용/예산의 경쟁 조건 | DB 트랜잭션 또는 원자 카운터, idempotency, reconciliation job 및 보수적 hard-limit 정책 적용 |
 | Enterprise 라이선스 혼합 | OSS/Enterprise package, 빌드 산출물, CI 및 배포 권한을 분리하고 법무·제품 승인을 거침 |
 | 기존 DB 의미론 불명확 | 코드 포팅 전 schema 및 운영 데이터 샘플 기반의 compatibility matrix를 승인 |
 
-착수 전 제품 책임자가 결정해야 할 사항은 다음과 같다: Go 전환의 최초 운영 대상이 self-hosted Gateway만인지 hosted control plane까지인지, P0에서 반드시 지원할 공급자와 endpoint, Python SDK 사용자에게 제공할 Go SDK 또는 migration path, 기존 Enterprise 계약과 신규 기능의 배포·라이선스 정책, compatibility proxy 종료 기한, 그리고 단계 0에서 확정할 성능·가용성 SLO다
+착수 전 제품 책임자가 결정해야 할 사항은 다음과 같다: Go 전환의 최초 운영 대상이 self-hosted Gateway만인지 hosted control plane까지인지, P0에서 반드시 지원할 공급자와 endpoint, 기존 Python SDK의 지원 종료·Go SDK 도입 정책, 기존 Enterprise 계약과 신규 기능의 배포·라이선스 정책, compatibility proxy 종료 기한, 그리고 단계 0에서 확정할 성능·가용성 SLO다
 
 ## 16. 산출물
 
 - Go Gateway/worker/SDK, container/Helm 배포물 및 운영 runbook
 - API·설정·DB compatibility matrix와 자동 contract test suite
-- [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), Python·Rust runtime inventory 및 제거 상태표
+- [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), 비-UI 코드 inventory 및 제거 상태표
 - P0 Enterprise control plane, migration 및 rollback 도구
 - 정책-as-code, 감사 export, 예산 자동 조치에 대한 RFC와 구현·보안 테스트
-- Python·Rust 경로별 포팅 상태표, 제거 계획 및 SDK migration guide
+- 비-UI Python·Rust·JS/TS 경로별 Go 재개발/삭제 상태표, 제거 계획 및 Go SDK 도입 guide
