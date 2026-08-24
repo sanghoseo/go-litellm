@@ -223,6 +223,7 @@ Client / OpenAI SDK / Admin UI
 
 - Go Gateway/worker/SDK, container/Helm 배포물 및 운영 runbook
 - API·설정·DB compatibility matrix와 자동 contract test suite
+- [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), Python·Rust runtime inventory 및 제거 상태표
 - P0 Enterprise control plane, migration 및 rollback 도구
 - 정책-as-code, 감사 export, 예산 자동 조치에 대한 RFC와 구현·보안 테스트
 - Python·Rust 경로별 포팅 상태표, 제거 계획 및 SDK migration guide
