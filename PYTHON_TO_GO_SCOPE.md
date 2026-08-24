@@ -2,7 +2,7 @@
 
 ## 목적
 
-이 문서는 `ui/`를 제외한 LiteLLM의 Python 코드를 Go로 재개발하기 위한 범위를 정의한다. 최종 목표는 Python 런타임·패키지·테스트·CLI·스크립트 없이 Go 서비스, Go SDK, Go CLI, Go test만으로 LiteLLM을 빌드·검증·배포하는 것이다. `ui/`의 대시보드는 그대로 유지한다
+이 문서는 `ui/`와 Enterprise 경계를 제외한 LiteLLM의 Python 코드를 Go로 재개발하기 위한 범위를 정의한다. 최종 목표는 OSS/core 영역에서 Python 런타임·패키지·테스트·CLI·스크립트 없이 Go 서비스, Go SDK, Go CLI, Go test만으로 LiteLLM을 빌드·검증·배포하는 것이다. `ui/`의 대시보드와 Enterprise Python backend는 그대로 유지한다
 
 이 문서는 Python 파일을 줄 단위로 번역하라는 의미가 아니다. Python 구현이 제공하는 공개 계약, provider 동작, 운영 기능, 데이터 의미론을 Go의 단순하고 강타입인 설계로 재구현한다
 
@@ -15,21 +15,22 @@
 | 영역 | 규모 | Go 전환 원칙 |
 | --- | ---: | --- |
 | `litellm/llms/` | 893 파일 | 모든 지원 provider·endpoint 변환을 Go adapter로 재개발 |
-| `litellm/proxy/` | 576 파일, 약 757 route 선언 | Gateway, 관리 API, 인증, 정책, DB/worker, Enterprise 연동을 Go 서비스로 재개발 |
+| `litellm/proxy/` | 576 파일, 약 757 route 선언 | OSS/core Gateway, 관리 API, 인증, routing/cache, DB/worker를 Go 서비스로 재개발. Enterprise 경로는 제외 |
 | `litellm/integrations/` | 197 파일 | 관측성·callback·prompt/guardrail·외부 서비스 integration을 Go native 또는 webhook contract로 재개발 |
-| `enterprise/` | 149 파일 | 상업 라이선스 경계를 유지한 Go Enterprise 패키지로 재개발 |
+| `enterprise/` | 149 파일 | 현재 제외. Python Enterprise backend와 테스트를 유지 |
 | `tests/` | 대규모 Python test suite | UI 전용 TS/Playwright를 제외하고 Go test, Go E2E, Go load test로 재작성 |
 | 기타 | SDK, router, cache, secret manager, model/type, CLI, script, cookbook, migration | 유지할 제품 기능은 Go로 재개발하고, 문서 예제·생성물·중복 도구는 삭제 또는 Go 예제로 교체 |
 
 ### 포함
 
-- `litellm/`, `enterprise/`, `litellm-proxy-extras/`, `backend/`, `gateway/`, `scripts/`, `db_scripts/`, `ci_cd/`, `migrations/`, `cookbook/`, `tests/`의 Python 실행 코드와 test code
+- `litellm/`, `litellm-proxy-extras/`, `backend/`, `gateway/`, `scripts/`, `db_scripts/`, `ci_cd/`, `migrations/`, `cookbook/`, `tests/`의 OSS/core Python 실행 코드와 test code
 - Python wheel/CLI, FastAPI Proxy, background worker, custom callback/plugin, local mock server, benchmark/load tool
 - Python이 생성하거나 검사하는 API schema, config parser, database migration helper, deployment validation logic
 
 ### 제외
 
 - `ui/`의 Next.js/React/TypeScript 대시보드 코드와 UI 전용 Playwright 테스트
+- `enterprise/`, Enterprise 전용 `litellm/` 경로와 Enterprise test. 이들은 `excluded-enterprise` 상태로 inventory에 기록하고 현재 Go 포팅하지 않는다
 - Markdown, YAML, JSON, SQL, HCL, Helm chart, Dockerfile와 같이 실행 언어가 아닌 설정·문서 artifact
 - 기능의 source-of-truth가 아닌 generated asset, 오래된 example, 중복 test/tool. 이들은 Go로 포팅하지 않고 단계 0 inventory에서 삭제 근거를 기록한다
 
@@ -85,7 +86,6 @@ internal/
   cache/          Memory and Redis/Valkey implementations
   secrets/        Environment/KMS/secret-manager integrations
   observability/  Logs, metrics, tracing, callback/webhook delivery
-  enterprise/     Commercially licensed Enterprise capabilities
 ```
 
 parity 단계에서는 `internal/parity/` 아래에 원본 책임을 추적하는 Go 파일을 둔다. 이 단계의 구조는 임시이며, parity 완료 뒤 `internal/`의 domain package로 이동한다. 최종 구조에서는 HTTP handler, provider transform, DB repository, callback delivery가 서로 직접 섞이지 않도록 Go의 컴파일 경계로 강제한다
@@ -140,13 +140,12 @@ parity 단계에서는 `internal/parity/` 아래에 원본 책임을 추적하�
 
 완료 기준: Go가 Python interpreter 없이 기존 지원 YAML의 inventory된 의미를 파싱하고, multi-instance routing/cache/budget 동작을 재현한다
 
-### 5. Observability, callback, guardrail, Enterprise, P0
+### 5. Observability, callback, guardrail, P0
 
-대상: `litellm/integrations/`, `litellm/proxy/hooks/`, `litellm/proxy/guardrails/`, `enterprise/`, `litellm/proxy/enterprise_billing/`
+대상: `litellm/integrations/`, `litellm/proxy/hooks/`, `litellm/proxy/guardrails/`
 
 - OpenTelemetry, Prometheus, structured logging, tracing, request/response logging, alerting, webhook/callback delivery
 - custom logger, custom guardrail, content safety, policy inheritance, prompt management, spend/cost reporting
-- Enterprise tenancy, RBAC, SSO/SCIM, audit, budget, project management, managed file/vector store, notification callbacks
 - 기존 Python class plugin은 Go interface를 binary plugin으로 노출하지 않는다. Go native plugin contract 또는 versioned external webhook/event contract로 재설계한다
 
 완료 기준: callback/spend/audit이 Go worker와 PostgreSQL outbox로 동작하며, Python callback runtime이나 Python Proxy callback endpoint가 필요하지 않다
@@ -178,17 +177,16 @@ parity 단계에서는 `internal/parity/` 아래에 원본 책임을 추적하�
 | 0. Inventory | 모든 Python 파일을 `port`, generated, duplicate, retire로 분류하고 1:1 manifest 생성 | source path, responsibility, public contract, Go parity source/test, owner, status가 기록 |
 | 1. Foundation parity | config, errors, types, auth, storage, cache, telemetry, test fixture framework의 1:1 Go 구현 | Go Gateway가 PostgreSQL/Redis 선택 모드에서 기동하고 원본 test assertion 대응 |
 | 2. Core gateway parity | chat/responses/embeddings, OpenAI/Anthropic/Azure/Bedrock/Gemini, routing, usage의 1:1 Go 구현 | P0 API contract와 streaming, Python test 대응을 Go-only로 검증 |
-| 3. Enterprise parity | tenancy, key, RBAC, budget, audit, policy, SSO/SCIM, dashboard API의 1:1 Go 구현 | 대시보드와 Terraform E2E, 원본 Enterprise test 대응이 Go backend에서 통과 |
-| 4. Full parity | 나머지 provider, endpoint, integration, cache, secret, extension, SDK/CLI/tooling/test | `port` 상태의 모든 Python source에 Go parity source/test가 있고, 기능 누락이 없음 |
+| 3. OSS/core parity | 나머지 provider, endpoint, integration, cache, secret, extension, SDK/CLI/tooling/test | `port` 상태의 모든 OSS/core Python source에 Go parity source/test가 있고, 기능 누락이 없음 |
 | 5. Refactor | Go package 통합, shared abstraction, file split/merge, duplicate removal | refactor 전후 Go contract/E2E/load test 통과, public behavior 불변 |
-| 6. Removal | Python package, dependencies, images, CI, packaging 제거 | `ui/litellm-dashboard/` 밖 Python source와 Python runtime 의존이 0 |
+| 6. Removal | OSS/core Python package, dependencies, images, CI, packaging 제거 | `ui/`와 Enterprise 경계 밖 Python source와 Python runtime 의존이 0 |
 
 ## 최종 검증 게이트
 
-- `git ls-files` 기준 `ui/` 밖에 Python source가 없다. 예외가 필요한 데이터 fixture는 `.py`가 아닌 JSON/YAML/SQL로 변환한다
+- `git ls-files` 기준 `ui/`와 Enterprise 경계 밖에 Python source가 없다. 예외가 필요한 데이터 fixture는 `.py`가 아닌 JSON/YAML/SQL로 변환한다
 - production image, Go SDK/CLI image, Go test/tool image에 Python interpreter, `pip`, Python wheel, PyO3 bridge가 없다
 - 모든 지원 provider/endpoint에는 Go implementation, contract test, owner가 있다
 - 모든 `port` Python 파일에는 source-to-Go parity mapping, Go parity test, parity-passing 상태가 있다. refactor는 이 gate 뒤에만 시작하고, refactor 전후 mapping ID와 contract fixture를 유지한다
-- Enterprise 기능과 dashboard 관리 화면이 Go backend와 PostgreSQL/Redis 또는 standalone 실행 모드에서 문서화된 방식으로 동작한다
+- OSS/core 기능과 해당 dashboard 화면이 Go backend와 PostgreSQL/Redis 또는 standalone 실행 모드에서 문서화된 방식으로 동작한다. Enterprise 화면은 Python Enterprise backend를 유지한다
 - CI는 Go build, Go test, Go E2E/load test, dashboard UI test만 실행하고 `pytest` 또는 Python script에 의존하지 않는다
 - compatibility proxy는 종료 전에 제거하며, final Go-only canary가 운영 SLO를 충족해야 한다
