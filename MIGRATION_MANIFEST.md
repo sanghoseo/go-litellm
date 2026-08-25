@@ -9,7 +9,7 @@
 
 | 단계 | 원본 영역 | Go 목적지 | 상태 |
 | --- | --- | --- | --- |
-| A | `litellm/_uuid.py`, `exceptions.py`, `_internal_context.py` | `litellm/` 공통 SDK | 진행 중 |
+| A | `litellm/_uuid.py`, `exceptions.py`, `_internal_context.py` | `litellm/` 공통 SDK | 부분 이식 |
 | B | `litellm/types/`, `types/` | `pkg/types/` | 대기 |
 | C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 대기 |
 | D | `litellm/llms/**`, provider transformations | `internal/providers/` | 대기 |
