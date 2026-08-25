@@ -164,6 +164,39 @@ func TestUserManagementLifecycle(t *testing.T) {
 	}
 }
 
+func TestProjectManagementLifecycle(t *testing.T) {
+	manager := &memoryProjectManager{projects: map[string]auth.ManagedProject{}}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithProjectManager(manager)
+	create := httptest.NewRequest(http.MethodPost, "/project/new", strings.NewReader("{\"project_id\":\"project-test\",\"project_alias\":\"Platform\",\"team_id\":\"team-test\",\"models\":[\"gateway-model\"]}"))
+	create.Header.Set("Authorization", "Bearer master-key")
+	created := httptest.NewRecorder()
+	server.Handler().ServeHTTP(created, create)
+	if created.Code != http.StatusOK || manager.projects["project-test"].ProjectAlias != "Platform" {
+		t.Fatalf("create status=%d projects=%#v", created.Code, manager.projects)
+	}
+	update := httptest.NewRequest(http.MethodPost, "/project/update", strings.NewReader("{\"project_id\":\"project-test\",\"project_alias\":\"Updated\"}"))
+	update.Header.Set("Authorization", "Bearer master-key")
+	updated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || manager.projects["project-test"].ProjectAlias != "Updated" {
+		t.Fatalf("update status=%d project=%#v", updated.Code, manager.projects["project-test"])
+	}
+	block := httptest.NewRequest(http.MethodPost, "/project/block", strings.NewReader("{\"project_id\":\"project-test\"}"))
+	block.Header.Set("Authorization", "Bearer master-key")
+	blocked := httptest.NewRecorder()
+	server.Handler().ServeHTTP(blocked, block)
+	if blocked.Code != http.StatusOK || !manager.projects["project-test"].Blocked {
+		t.Fatalf("block status=%d project=%#v", blocked.Code, manager.projects["project-test"])
+	}
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/project/delete", strings.NewReader("{\"project_id\":\"project-test\"}"))
+	deleteRequest.Header.Set("Authorization", "Bearer master-key")
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK || len(manager.projects) != 0 {
+		t.Fatalf("delete status=%d projects=%#v", deleted.Code, manager.projects)
+	}
+}
+
 func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(
 		config.Config{Models: []config.Model{
@@ -532,6 +565,71 @@ type memoryTeamManager struct {
 
 type memoryUserManager struct {
 	users map[string]auth.ManagedUser
+}
+
+type memoryProjectManager struct {
+	projects map[string]auth.ManagedProject
+}
+
+func (manager *memoryProjectManager) CreateProject(_ context.Context, project auth.ManagedProject) error {
+	manager.projects[project.ProjectID] = project
+	return nil
+}
+func (manager *memoryProjectManager) GetProject(_ context.Context, projectID string) (auth.ManagedProject, error) {
+	project, found := manager.projects[projectID]
+	if !found {
+		return auth.ManagedProject{}, auth.ErrInvalidVirtualKey
+	}
+	return project, nil
+}
+func (manager *memoryProjectManager) UpdateProject(_ context.Context, projectID string, update auth.ManagedProjectUpdate) (bool, error) {
+	project, found := manager.projects[projectID]
+	if !found {
+		return false, nil
+	}
+	if update.ProjectAlias != nil {
+		project.ProjectAlias = *update.ProjectAlias
+	}
+	if update.Description != nil {
+		project.Description = *update.Description
+	}
+	if update.TeamID != nil {
+		project.TeamID = *update.TeamID
+	}
+	if update.BudgetID != nil {
+		project.BudgetID = *update.BudgetID
+	}
+	if update.Models != nil {
+		project.Models = *update.Models
+	}
+	if update.Blocked != nil {
+		project.Blocked = *update.Blocked
+	}
+	manager.projects[projectID] = project
+	return true, nil
+}
+func (manager *memoryProjectManager) ListProjects(_ context.Context, _ int) ([]auth.ManagedProject, error) {
+	projects := make([]auth.ManagedProject, 0, len(manager.projects))
+	for _, project := range manager.projects {
+		projects = append(projects, project)
+	}
+	return projects, nil
+}
+func (manager *memoryProjectManager) SetProjectBlocked(_ context.Context, projectID string, blocked bool) (bool, error) {
+	project, found := manager.projects[projectID]
+	if !found {
+		return false, nil
+	}
+	project.Blocked = blocked
+	manager.projects[projectID] = project
+	return true, nil
+}
+func (manager *memoryProjectManager) DeleteProject(_ context.Context, projectID string) (bool, error) {
+	if _, found := manager.projects[projectID]; !found {
+		return false, nil
+	}
+	delete(manager.projects, projectID)
+	return true, nil
 }
 
 func (manager *memoryUserManager) CreateUser(_ context.Context, user auth.ManagedUser) error {
