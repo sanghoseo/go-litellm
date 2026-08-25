@@ -7,6 +7,7 @@ RUN go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
+COPY pkg ./pkg
 COPY litellm ./litellm
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/litellm-proxy ./cmd/litellm-proxy
 
