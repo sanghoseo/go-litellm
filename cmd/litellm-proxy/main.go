@@ -22,6 +22,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
 	"github.com/BerriAI/litellm/go-proxy/internal/store/postgres"
 	redisstore "github.com/BerriAI/litellm/go-proxy/internal/store/redis"
+	"github.com/BerriAI/litellm/go-proxy/internal/usage"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -60,6 +61,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 
 	var database *pgxpool.Pool
 	var keyValidator httpapi.VirtualKeyValidator
+	var usageRecorder usage.Recorder
 	if proxyConfig.DatabaseURL != "" {
 		database, err = pgxpool.New(context.Background(), proxyConfig.DatabaseURL)
 		if err != nil {
@@ -70,6 +72,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 			return fmt.Errorf("initialize PostgreSQL schema: %w", err)
 		}
 		keyValidator = auth.NewValidator(postgres.NewVirtualKeyStore(database))
+		usageRecorder = postgres.NewSpendLogStore(database)
 	}
 	if proxyConfig.RedisURL != "" {
 		redisClient, err := redisstore.New(proxyConfig.RedisURL)
@@ -89,7 +92,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	})
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithVirtualKeyValidator(proxyConfig, providerRegistry, keyValidator).Handler(),
+		Handler:           httpapi.NewServerWithDependencies(proxyConfig, providerRegistry, keyValidator, usageRecorder).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)

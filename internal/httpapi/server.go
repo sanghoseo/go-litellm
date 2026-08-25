@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -9,11 +10,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 	"github.com/BerriAI/litellm/go-proxy/internal/routing"
+	"github.com/BerriAI/litellm/go-proxy/internal/usage"
+	"github.com/BerriAI/litellm/go-proxy/litellm"
 )
 
 type VirtualKeyValidator interface {
@@ -27,6 +31,7 @@ type Server struct {
 	embedder      providers.Embedder
 	keyValidator  VirtualKeyValidator
 	router        *routing.Router
+	usageRecorder usage.Recorder
 }
 
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
@@ -40,7 +45,11 @@ func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter)
 }
 
 func NewServerWithVirtualKeyValidator(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, router: routing.New(proxyConfig.Models)}
+	return NewServerWithDependencies(proxyConfig, completer, validator, nil)
+}
+
+func NewServerWithDependencies(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder) Server {
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, router: routing.New(proxyConfig.Models)}
 	server.setOptionalCompleters(completer)
 	return server
 }
@@ -99,7 +108,8 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
 		return
 	}
-	if _, authorized := server.authorize(request, modelName); !authorized {
+	_, authorized := server.authorize(request, modelName)
+	if !authorized {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
@@ -139,11 +149,13 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
 		return
 	}
-	if _, authorized := server.authorize(request, modelName); !authorized {
+	virtualKey, authorized := server.authorize(request, modelName)
+	if !authorized {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
 
+	startedAt := time.Now().UTC()
 	upstream, err := server.chatCompleter.ChatCompletion(request.Context(), deployment, body)
 	if err != nil {
 		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
@@ -153,9 +165,25 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 
 	copyResponseHeaders(writer.Header(), upstream.Header)
 	writer.WriteHeader(upstream.StatusCode)
-	if err := copyResponse(writer, upstream.Body); err != nil {
+	responseBody := bytes.Buffer{}
+	_ = copyResponse(writer, io.TeeReader(upstream.Body, &responseBody))
+	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode)
+}
+
+func (server Server) recordUsage(ctx context.Context, keyHash string, deployment config.Model, body []byte, startedAt time.Time, statusCode int) {
+	if server.usageRecorder == nil {
 		return
 	}
+	requestID, err := litellm.UUID4()
+	if err != nil {
+		return
+	}
+	responseUsage, err := usage.UsageFromOpenAIResponse(body)
+	if err != nil {
+		return
+	}
+	provider, _, _ := strings.Cut(deployment.Model, "/")
+	_ = server.usageRecorder.Insert(ctx, usage.Record{RequestID: requestID, CallType: "chat_completion", APIKeyHash: keyHash, Model: deployment.Name, Provider: provider, APIBase: deployment.APIBase, StartedAt: startedAt, CompletedAt: time.Now().UTC(), Usage: responseUsage, Status: http.StatusText(statusCode)})
 }
 
 func requestedModel(body []byte) (string, error) {
