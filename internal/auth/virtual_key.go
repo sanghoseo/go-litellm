@@ -14,6 +14,8 @@ var ErrInvalidVirtualKey = errors.New("invalid virtual key")
 type VirtualKey struct {
 	TokenHash string
 	Models    []string
+	UserID    string
+	TeamID    string
 	ExpiresAt *time.Time
 	Blocked   bool
 	RPMLimit  *int64
@@ -23,6 +25,8 @@ type ManagedVirtualKey struct {
 	TokenHash string
 	KeyAlias  string
 	Models    []string
+	UserID    string
+	TeamID    string
 	ExpiresAt *time.Time
 	Blocked   bool
 	RPMLimit  *int64
