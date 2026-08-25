@@ -33,3 +33,9 @@ type ImageGenerator interface {
 type SpeechCreator interface {
 	CreateSpeech(context.Context, config.Model, []byte) (Response, error)
 }
+
+// PassthroughClient forwards OpenAI-compatible resource APIs whose request does
+// not necessarily include a model name, such as files and batches.
+type PassthroughClient interface {
+	Passthrough(context.Context, config.Model, string, string, string, []byte) (Response, error)
+}

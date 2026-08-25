@@ -260,6 +260,31 @@ func TestSpeechForwardsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
+	provider := &resourceProvider{}
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "resource-model", Model: "openai/gpt-5"}}},
+		provider,
+	)
+	for _, testCase := range []struct {
+		method   string
+		path     string
+		endpoint string
+	}{
+		{http.MethodPost, "/v1/files", "files"},
+		{http.MethodGet, "/v1/files/file-123/content", "files/file-123/content"},
+		{http.MethodPost, "/v1/batches/batch-123/cancel", "batches/batch-123/cancel"},
+	} {
+		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(`{"test":true}`))
+		request.Header.Set("Authorization", "Bearer master-key")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK || provider.endpoint != testCase.endpoint || provider.deployment.Name != "resource-model" {
+			t.Fatalf("%s %s: status=%d endpoint=%q deployment=%q", testCase.method, testCase.path, response.Code, provider.endpoint, provider.deployment.Name)
+		}
+	}
+}
+
 type stubChatCompleter struct{}
 
 type deploymentCapturingCompleter struct {
@@ -306,6 +331,26 @@ func (mediaProvider) GenerateImage(context.Context, config.Model, []byte) (provi
 }
 func (mediaProvider) CreateSpeech(context.Context, config.Model, []byte) (providers.Response, error) {
 	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("audio-bytes"))}, nil
+}
+
+type resourceProvider struct {
+	endpoint   string
+	deployment config.Model
+}
+
+func (*resourceProvider) ChatCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (*resourceProvider) CreateResponse(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (*resourceProvider) CreateEmbedding(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (provider *resourceProvider) Passthrough(_ context.Context, deployment config.Model, _ string, endpoint, _ string, _ []byte) (providers.Response, error) {
+	provider.endpoint = endpoint
+	provider.deployment = deployment
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
 }
 
 type usageChatCompleter struct{}

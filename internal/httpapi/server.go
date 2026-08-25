@@ -46,6 +46,7 @@ type Server struct {
 	embedder        providers.Embedder
 	imageGenerator  providers.ImageGenerator
 	speechCreator   providers.SpeechCreator
+	passthrough     providers.PassthroughClient
 	keyValidator    VirtualKeyValidator
 	router          *routing.Router
 	usageRecorder   usage.Recorder
@@ -97,6 +98,9 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 	if speechCreator, ok := completer.(providers.SpeechCreator); ok {
 		server.speechCreator = speechCreator
 	}
+	if passthrough, ok := completer.(providers.PassthroughClient); ok {
+		server.passthrough = passthrough
+	}
 }
 
 func (server Server) Handler() http.Handler {
@@ -109,6 +113,15 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	mux.HandleFunc("POST /v1/images/generations", server.images)
 	mux.HandleFunc("POST /v1/audio/speech", server.speech)
+	mux.HandleFunc("GET /v1/files", server.files)
+	mux.HandleFunc("POST /v1/files", server.files)
+	mux.HandleFunc("GET /v1/files/{fileID}", server.file)
+	mux.HandleFunc("DELETE /v1/files/{fileID}", server.file)
+	mux.HandleFunc("GET /v1/files/{fileID}/content", server.fileContent)
+	mux.HandleFunc("POST /v1/batches", server.batches)
+	mux.HandleFunc("GET /v1/batches", server.batches)
+	mux.HandleFunc("GET /v1/batches/{batchID}", server.batch)
+	mux.HandleFunc("POST /v1/batches/{batchID}/cancel", server.cancelBatch)
 	handler := server.withRequestID(mux)
 	if server.metrics == nil {
 		return handler
@@ -158,6 +171,65 @@ func (server Server) speech(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	server.forwardModelRequest(writer, request, server.speechCreator.CreateSpeech)
+}
+
+func (server Server) files(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "files")
+}
+
+func (server Server) file(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "files/"+request.PathValue("fileID"))
+}
+
+func (server Server) fileContent(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "files/"+request.PathValue("fileID")+"/content")
+}
+
+func (server Server) batches(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "batches")
+}
+
+func (server Server) batch(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "batches/"+request.PathValue("batchID"))
+}
+
+func (server Server) cancelBatch(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "batches/"+request.PathValue("batchID")+"/cancel")
+}
+
+func (server Server) forwardPassthrough(writer http.ResponseWriter, request *http.Request, endpoint string) {
+	if server.passthrough == nil {
+		server.providerUnavailable(writer, "No OpenAI-compatible resource provider is configured")
+		return
+	}
+	deployment, found := server.defaultDeployment()
+	if !found {
+		server.providerUnavailable(writer, "No deployment is configured")
+		return
+	}
+	virtualKey, authorized := server.authorize(request, deployment.Name)
+	if !authorized {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	if !server.allowedByRateLimit(request.Context(), virtualKey, deployment.Name) {
+		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 100<<20))
+	if err != nil {
+		writeJSON(writer, http.StatusRequestEntityTooLarge, openAIError{Message: "Request body exceeds 100 MiB", Type: "invalid_request_error", Code: "request_too_large"})
+		return
+	}
+	upstream, err := server.passthrough.Passthrough(request.Context(), deployment, request.Method, endpoint, request.Header.Get("Content-Type"), body)
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
+		return
+	}
+	defer upstream.Body.Close()
+	copyResponseHeaders(writer.Header(), upstream.Header)
+	writer.WriteHeader(upstream.StatusCode)
+	_ = copyResponse(writer, upstream.Body)
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
@@ -338,6 +410,13 @@ func (server Server) deploymentFor(modelName string) (config.Model, bool) {
 	}
 	model, err := server.router.Select(modelName)
 	return model, err == nil
+}
+
+func (server Server) defaultDeployment() (config.Model, bool) {
+	if len(server.config.Models) == 0 {
+		return config.Model{}, false
+	}
+	return server.config.Models[0], true
 }
 
 func copyResponseHeaders(destination http.Header, source http.Header) {

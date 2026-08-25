@@ -88,3 +88,29 @@ func TestGenerateImageUsesOpenAIImagesEndpoint(t *testing.T) {
 	}
 	defer response.Body.Close()
 }
+
+func TestPassthroughPreservesMultipartBody(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/files" {
+			t.Fatalf("method=%s path=%s", request.Method, request.URL.Path)
+		}
+		if request.Header.Get("Content-Type") != "multipart/form-data; boundary=test-boundary" {
+			t.Fatalf("content type=%q", request.Header.Get("Content-Type"))
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "--test-boundary--" {
+			t.Fatalf("body=%q", body)
+		}
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).Passthrough(context.Background(), config.Model{Model: "openai/gpt-5", APIBase: upstream.URL + "/v1"}, http.MethodPost, "files", "multipart/form-data; boundary=test-boundary", []byte("--test-boundary--"))
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	defer response.Body.Close()
+}

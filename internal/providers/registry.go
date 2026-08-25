@@ -89,6 +89,20 @@ func (registry Registry) CreateSpeech(ctx context.Context, deployment config.Mod
 	})
 }
 
+func (registry Registry) Passthrough(ctx context.Context, deployment config.Model, method, endpoint, contentType string, body []byte) (Response, error) {
+	client, err := registry.clientFor(deployment)
+	if err != nil {
+		return Response{}, err
+	}
+	passthroughClient, ok := client.(PassthroughClient)
+	if !ok {
+		return Response{}, ErrProviderNotConfigured
+	}
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return passthroughClient.Passthrough(callContext, deployment, method, endpoint, contentType, body)
+	})
+}
+
 func retry(ctx context.Context, deployment config.Model, call func(context.Context) (Response, error)) (Response, error) {
 	attempts := deployment.NumRetries + 1
 	for attempt := 0; attempt < attempts; attempt++ {

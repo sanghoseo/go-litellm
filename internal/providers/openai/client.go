@@ -45,6 +45,31 @@ func (client Client) CreateSpeech(ctx context.Context, deployment config.Model, 
 	return client.request(ctx, deployment, body, "audio/speech")
 }
 
+func (client Client) Passthrough(ctx context.Context, deployment config.Model, method, endpoint, contentType string, body []byte) (providers.Response, error) {
+	targetURL, err := endpointURL(deployment.APIBase, endpoint)
+	if err != nil {
+		return providers.Response{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(body))
+	if err != nil {
+		return providers.Response{}, fmt.Errorf("create upstream passthrough request: %w", err)
+	}
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	if deployment.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+deployment.APIKey)
+	}
+	if requestID := observability.RequestID(ctx); requestID != "" {
+		request.Header.Set("X-Request-Id", requestID)
+	}
+	response, err := client.httpClient.Do(request)
+	if err != nil {
+		return providers.Response{}, fmt.Errorf("send upstream passthrough request: %w", err)
+	}
+	return providers.Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil
+}
+
 func (client Client) request(ctx context.Context, deployment config.Model, body []byte, endpoint string) (providers.Response, error) {
 	targetURL, err := endpointURL(deployment.APIBase, endpoint)
 	if err != nil {
