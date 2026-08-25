@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -35,7 +36,9 @@ func (registry Registry) ChatCompletion(ctx context.Context, deployment config.M
 	if err != nil {
 		return Response{}, err
 	}
-	return retry(ctx, deployment, func() (Response, error) { return client.ChatCompletion(ctx, deployment, body) })
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return client.ChatCompletion(callContext, deployment, body)
+	})
 }
 
 func (registry Registry) CreateResponse(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
@@ -43,7 +46,9 @@ func (registry Registry) CreateResponse(ctx context.Context, deployment config.M
 	if err != nil {
 		return Response{}, err
 	}
-	return retry(ctx, deployment, func() (Response, error) { return client.CreateResponse(ctx, deployment, body) })
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return client.CreateResponse(callContext, deployment, body)
+	})
 }
 
 func (registry Registry) CreateEmbedding(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
@@ -51,13 +56,21 @@ func (registry Registry) CreateEmbedding(ctx context.Context, deployment config.
 	if err != nil {
 		return Response{}, err
 	}
-	return retry(ctx, deployment, func() (Response, error) { return client.CreateEmbedding(ctx, deployment, body) })
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return client.CreateEmbedding(callContext, deployment, body)
+	})
 }
 
-func retry(ctx context.Context, deployment config.Model, call func() (Response, error)) (Response, error) {
+func retry(ctx context.Context, deployment config.Model, call func(context.Context) (Response, error)) (Response, error) {
 	attempts := deployment.NumRetries + 1
 	for attempt := 0; attempt < attempts; attempt++ {
-		response, err := call()
+		callContext, cancel := withTimeout(ctx, deployment.Timeout)
+		response, err := call(callContext)
+		if response.Body != nil {
+			response.Body = &cancelReadCloser{ReadCloser: response.Body, cancel: cancel}
+		} else {
+			cancel()
+		}
 		if err == nil && response.StatusCode < http.StatusInternalServerError {
 			return response, nil
 		}
@@ -74,6 +87,24 @@ func retry(ctx context.Context, deployment config.Model, call func() (Response, 
 		}
 	}
 	return Response{}, nil
+}
+
+func withTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+type cancelReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (reader *cancelReadCloser) Close() error {
+	err := reader.ReadCloser.Close()
+	reader.cancel()
+	return err
 }
 
 func (registry Registry) clientFor(deployment config.Model) (Client, error) {

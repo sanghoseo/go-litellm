@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 )
@@ -25,6 +26,15 @@ func TestRegistryRetriesServerFailures(t *testing.T) {
 	response, err := registry.ChatCompletion(context.Background(), config.Model{Model: "openai/gpt-test", NumRetries: 1}, nil)
 	if err != nil || response.StatusCode != http.StatusOK || client.calls != 2 {
 		t.Fatalf("response=%#v err=%v calls=%d", response, err, client.calls)
+	}
+}
+
+func TestRegistryPassesDeploymentTimeoutToProvider(t *testing.T) {
+	client := timeoutClient{}
+	registry := NewRegistry(map[string]Client{"openai": client})
+	_, err := registry.ChatCompletion(context.Background(), config.Model{Model: "openai/gpt-test", Timeout: time.Second}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -62,5 +72,20 @@ func (*retryClient) CreateResponse(context.Context, config.Model, []byte) (Respo
 	return Response{}, nil
 }
 func (*retryClient) CreateEmbedding(context.Context, config.Model, []byte) (Response, error) {
+	return Response{}, nil
+}
+
+type timeoutClient struct{}
+
+func (timeoutClient) ChatCompletion(ctx context.Context, _ config.Model, _ []byte) (Response, error) {
+	if _, found := ctx.Deadline(); !found {
+		return Response{}, errors.New("missing deadline")
+	}
+	return Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+}
+func (timeoutClient) CreateResponse(context.Context, config.Model, []byte) (Response, error) {
+	return Response{}, nil
+}
+func (timeoutClient) CreateEmbedding(context.Context, config.Model, []byte) (Response, error) {
 	return Response{}, nil
 }
