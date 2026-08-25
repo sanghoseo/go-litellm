@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
@@ -39,5 +40,29 @@ func TestChatCompletionConvertsMessagesAndResponse(t *testing.T) {
 	const expectedResponsePrefix = `{"id":"msg_1","object":"chat.completion","created":`
 	if len(converted) < len(expectedResponsePrefix) || string(converted[:len(expectedResponsePrefix)]) != expectedResponsePrefix {
 		t.Fatalf("converted response = %s", converted)
+	}
+}
+
+func TestChatCompletionConvertsAnthropicStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-test\"}}\n\n")
+		_, _ = io.WriteString(writer, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n")
+		_, _ = io.WriteString(writer, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n")
+		_, _ = io.WriteString(writer, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).ChatCompletion(context.Background(), config.Model{Model: "anthropic/claude-test", APIBase: upstream.URL}, []byte(`{"model":"gateway","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	defer response.Body.Close()
+	stream, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if !strings.Contains(string(stream), `"content":"hello"`) || !strings.HasSuffix(string(stream), "data: [DONE]\n\n") {
+		t.Fatalf("converted stream = %s", stream)
 	}
 }

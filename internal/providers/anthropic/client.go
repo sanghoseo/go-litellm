@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -50,12 +51,82 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return providers.Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil
 	}
+	if isStreaming(requestBody) {
+		return providers.Response{StatusCode: response.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: openAIStream(response.Body)}, nil
+	}
 	defer response.Body.Close()
 	converted, err := chatCompletionResponse(response.Body)
 	if err != nil {
 		return providers.Response{}, err
 	}
 	return providers.Response{StatusCode: response.StatusCode, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(converted))}, nil
+}
+
+func isStreaming(body []byte) bool {
+	var payload struct {
+		Stream bool `json:"stream"`
+	}
+	return json.Unmarshal(body, &payload) == nil && payload.Stream
+}
+
+func openAIStream(source io.ReadCloser) io.ReadCloser {
+	reader, writer := io.Pipe()
+	go func() {
+		defer source.Close()
+		defer writer.Close()
+		var id, model string
+		created := time.Now().Unix()
+		scanner := bufio.NewScanner(source)
+		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			var event struct {
+				Type    string `json:"type"`
+				Index   int    `json:"index"`
+				Message struct {
+					ID    string `json:"id"`
+					Model string `json:"model"`
+				} `json:"message"`
+				Delta struct {
+					Type       string `json:"type"`
+					Text       string `json:"text"`
+					StopReason string `json:"stop_reason"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &event) != nil {
+				continue
+			}
+			switch event.Type {
+			case "message_start":
+				id, model = event.Message.ID, event.Message.Model
+				writeChunk(writer, id, model, created, event.Index, proxytpes.Delta{Role: "assistant"}, nil)
+			case "content_block_delta":
+				if event.Delta.Type == "text_delta" {
+					writeChunk(writer, id, model, created, event.Index, proxytpes.Delta{Content: event.Delta.Text}, nil)
+				}
+			case "message_delta":
+				finishReason := event.Delta.StopReason
+				if finishReason == "end_turn" {
+					finishReason = "stop"
+				}
+				writeChunk(writer, id, model, created, 0, proxytpes.Delta{}, &finishReason)
+			case "message_stop":
+				_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+			}
+		}
+	}()
+	return reader
+}
+
+func writeChunk(writer *io.PipeWriter, id string, model string, created int64, index int, delta proxytpes.Delta, finishReason *string) {
+	chunk, err := json.Marshal(proxytpes.ChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: model, Choices: []proxytpes.StreamingChoice{{Index: index, Delta: delta, FinishReason: finishReason}}})
+	if err == nil {
+		_, _ = writer.Write(append([]byte("data: "), append(chunk, []byte("\n\n")...)...))
+	}
 }
 
 func (client Client) CreateResponse(context.Context, config.Model, []byte) (providers.Response, error) {
