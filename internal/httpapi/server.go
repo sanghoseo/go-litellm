@@ -247,6 +247,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/assistants/{assistantID}", server.assistant)
 	mux.HandleFunc("GET /v1/threads", server.threads)
 	mux.HandleFunc("POST /v1/threads", server.threads)
+	mux.HandleFunc("POST /v1/threads/runs", server.threadAndRun)
 	mux.HandleFunc("GET /v1/threads/{threadID}", server.thread)
 	mux.HandleFunc("POST /v1/threads/{threadID}", server.thread)
 	mux.HandleFunc("DELETE /v1/threads/{threadID}", server.thread)
@@ -260,6 +261,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/threads/{threadID}/runs/{runID}/cancel", server.cancelThreadRun)
 	mux.HandleFunc("POST /v1/threads/{threadID}/runs/{runID}/submit_tool_outputs", server.submitThreadRunToolOutputs)
 	mux.HandleFunc("GET /v1/threads/{threadID}/runs/{runID}/steps", server.threadRunSteps)
+	mux.HandleFunc("GET /v1/threads/{threadID}/runs/{runID}/steps/{stepID}", server.threadRunStep)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -419,6 +421,9 @@ func (server Server) assistant(writer http.ResponseWriter, request *http.Request
 func (server Server) threads(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "threads")
 }
+func (server Server) threadAndRun(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/runs")
+}
 func (server Server) thread(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID"))
 }
@@ -442,6 +447,9 @@ func (server Server) submitThreadRunToolOutputs(writer http.ResponseWriter, requ
 }
 func (server Server) threadRunSteps(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID")+"/steps")
+}
+func (server Server) threadRunStep(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID")+"/steps/"+request.PathValue("stepID"))
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
