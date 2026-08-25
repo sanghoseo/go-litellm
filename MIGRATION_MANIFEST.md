@@ -13,7 +13,7 @@
 | B | `litellm/types/`, `types/` | `pkg/types/` | chat/embedding/responses 핵심 OpenAI 타입 이식 |
 | C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 공개 chat/text Completion·Embedding·Responses·Moderation·Rerank·Image generation·Speech·Files·Batches/SSE SDK·router retry/alias/fallback 이식 |
 | D | `litellm/llms/**`, provider transformations | `internal/providers/` | adapter registry·OpenAI·Azure·Anthropic chat/SSE·Gemini·Bedrock Converse chat·OpenRouter 및 `api_base` 기반 OpenAI-compatible(Groq/Mistral/DeepSeek/Perplexity/Together/Cerebras/Ollama/vLLM/xAI/Fireworks/SambaNova/NVIDIA NIM/Anyscale/Databricks) API 이식 |
-| E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis cache·chat/text/response/embedding/moderation usage·spend·RPM·readiness·master-key 기반 virtual key 생성/조회/목록/수정/삭제/재생성/차단·해제 이식 |
+| E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis cache·chat/text/response/embedding/moderation usage·spend·RPM·readiness·master-key 기반 virtual key lifecycle 및 team 생성/조회/목록/차단·해제/삭제 이식 |
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | Prometheus HTTP metrics·request ID 전파 이식 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/httpapi/`, `internal/providers/` | embeddings·rerank·moderations·OpenAI-compatible image generation/edit, audio/files/batches/vector stores API pass-through 이식; LiteLLM 관리형 multi-provider vector-store registry 대기 |
 | H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | 핵심 운영 DDL 이식 |

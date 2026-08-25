@@ -95,6 +95,39 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	}
 }
 
+func TestTeamManagementLifecycle(t *testing.T) {
+	manager := &memoryTeamManager{teams: map[string]auth.ManagedTeam{}}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithTeamManager(manager)
+	create := httptest.NewRequest(http.MethodPost, "/team/new", strings.NewReader(`{"team_id":"team-test","team_alias":"Engineering","admins":["admin"],"members":["member"],"models":["gateway-model"]}`))
+	create.Header.Set("Authorization", "Bearer master-key")
+	created := httptest.NewRecorder()
+	server.Handler().ServeHTTP(created, create)
+	if created.Code != http.StatusOK || manager.teams["team-test"].TeamAlias != "Engineering" {
+		t.Fatalf("create status=%d teams=%#v", created.Code, manager.teams)
+	}
+	info := httptest.NewRequest(http.MethodGet, "/team/info?team_id=team-test", nil)
+	info.Header.Set("Authorization", "Bearer master-key")
+	infoResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(infoResponse, info)
+	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"team_alias":"Engineering"`) {
+		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
+	}
+	block := httptest.NewRequest(http.MethodPost, "/team/block", strings.NewReader(`{"team_id":"team-test"}`))
+	block.Header.Set("Authorization", "Bearer master-key")
+	blocked := httptest.NewRecorder()
+	server.Handler().ServeHTTP(blocked, block)
+	if blocked.Code != http.StatusOK || !manager.teams["team-test"].Blocked {
+		t.Fatalf("block status=%d team=%#v", blocked.Code, manager.teams["team-test"])
+	}
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/team/delete", strings.NewReader(`{"team_id":"team-test"}`))
+	deleteRequest.Header.Set("Authorization", "Bearer master-key")
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK || len(manager.teams) != 0 {
+		t.Fatalf("delete status=%d teams=%#v", deleted.Code, manager.teams)
+	}
+}
+
 func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(
 		config.Config{Models: []config.Model{
@@ -455,6 +488,45 @@ type stubChatCompleter struct{}
 
 type memoryKeyManager struct {
 	records map[string]auth.ManagedVirtualKey
+}
+
+type memoryTeamManager struct {
+	teams map[string]auth.ManagedTeam
+}
+
+func (manager *memoryTeamManager) CreateTeam(_ context.Context, team auth.ManagedTeam) error {
+	manager.teams[team.TeamID] = team
+	return nil
+}
+func (manager *memoryTeamManager) GetTeam(_ context.Context, teamID string) (auth.ManagedTeam, error) {
+	team, found := manager.teams[teamID]
+	if !found {
+		return auth.ManagedTeam{}, auth.ErrInvalidVirtualKey
+	}
+	return team, nil
+}
+func (manager *memoryTeamManager) ListTeams(_ context.Context, _ int) ([]auth.ManagedTeam, error) {
+	teams := make([]auth.ManagedTeam, 0, len(manager.teams))
+	for _, team := range manager.teams {
+		teams = append(teams, team)
+	}
+	return teams, nil
+}
+func (manager *memoryTeamManager) SetTeamBlocked(_ context.Context, teamID string, blocked bool) (bool, error) {
+	team, found := manager.teams[teamID]
+	if !found {
+		return false, nil
+	}
+	team.Blocked = blocked
+	manager.teams[teamID] = team
+	return true, nil
+}
+func (manager *memoryTeamManager) DeleteTeam(_ context.Context, teamID string) (bool, error) {
+	if _, found := manager.teams[teamID]; !found {
+		return false, nil
+	}
+	delete(manager.teams, teamID)
+	return true, nil
 }
 
 func (manager *memoryKeyManager) CreateVirtualKey(_ context.Context, record auth.ManagedVirtualKey) error {

@@ -45,6 +45,23 @@ type VirtualKeyManager interface {
 	RegenerateVirtualKey(context.Context, string, string) (ManagedVirtualKey, error)
 }
 
+type ManagedTeam struct {
+	TeamID    string
+	TeamAlias string
+	Admins    []string
+	Members   []string
+	Models    []string
+	Blocked   bool
+}
+
+type TeamManager interface {
+	CreateTeam(context.Context, ManagedTeam) error
+	GetTeam(context.Context, string) (ManagedTeam, error)
+	ListTeams(context.Context, int) ([]ManagedTeam, error)
+	SetTeamBlocked(context.Context, string, bool) (bool, error)
+	DeleteTeam(context.Context, string) (bool, error)
+}
+
 type VirtualKeyStore interface {
 	FindVirtualKey(context.Context, string) (VirtualKey, error)
 }

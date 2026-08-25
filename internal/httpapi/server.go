@@ -58,6 +58,7 @@ type Server struct {
 	responseCache   ResponseCache
 	metrics         *observability.Metrics
 	keyManager      auth.VirtualKeyManager
+	teamManager     auth.TeamManager
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -67,6 +68,11 @@ func (server Server) WithResponseCache(cache ResponseCache) Server {
 
 func (server Server) WithVirtualKeyManager(manager auth.VirtualKeyManager) Server {
 	server.keyManager = manager
+	return server
+}
+
+func (server Server) WithTeamManager(manager auth.TeamManager) Server {
+	server.teamManager = manager
 	return server
 }
 
@@ -135,6 +141,12 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /key/update", server.updateKey)
 	mux.HandleFunc("GET /key/list", server.listKeys)
 	mux.HandleFunc("POST /key/regenerate", server.regenerateKey)
+	mux.HandleFunc("POST /team/new", server.createTeam)
+	mux.HandleFunc("GET /team/info", server.teamInfo)
+	mux.HandleFunc("GET /team/list", server.listTeams)
+	mux.HandleFunc("POST /team/block", server.blockTeam)
+	mux.HandleFunc("POST /team/unblock", server.unblockTeam)
+	mux.HandleFunc("POST /team/delete", server.deleteTeam)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -534,6 +546,135 @@ func (server Server) regenerateKey(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+}
+
+type teamRequest struct {
+	TeamID    string   `json:"team_id"`
+	TeamAlias string   `json:"team_alias"`
+	Admins    []string `json:"admins"`
+	Members   []string `json:"members"`
+	Models    []string `json:"models"`
+}
+
+type teamResponse struct {
+	TeamID    string   `json:"team_id"`
+	TeamAlias string   `json:"team_alias,omitempty"`
+	Admins    []string `json:"admins"`
+	Members   []string `json:"members"`
+	Models    []string `json:"models"`
+	Blocked   bool     `json:"blocked"`
+}
+
+func (server Server) createTeam(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.teamManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input teamRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.TeamID == "" {
+		id, err := litellm.UUID4()
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not generate team id", Type: "server_error", Code: "team_creation_failed"})
+			return
+		}
+		input.TeamID = "team-" + id
+	}
+	team := auth.ManagedTeam{TeamID: input.TeamID, TeamAlias: input.TeamAlias, Admins: input.Admins, Members: input.Members, Models: input.Models}
+	if err := server.teamManager.CreateTeam(request.Context(), team); err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create team", Type: "server_error", Code: "team_creation_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, teamResponseFrom(team))
+}
+
+func (server Server) teamInfo(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.teamManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	teamID := request.URL.Query().Get("team_id")
+	if teamID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'team_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	team, err := server.teamManager.GetTeam(request.Context(), teamID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Team not found", Type: "invalid_request_error", Code: "team_not_found"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, teamResponseFrom(team))
+}
+
+func (server Server) listTeams(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.teamManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	teams, err := server.teamManager.ListTeams(request.Context(), 100)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not list teams", Type: "server_error", Code: "team_list_failed"})
+		return
+	}
+	response := make([]teamResponse, 0, len(teams))
+	for _, team := range teams {
+		response = append(response, teamResponseFrom(team))
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+}
+
+func (server Server) blockTeam(writer http.ResponseWriter, request *http.Request) {
+	server.setTeamBlocked(writer, request, true)
+}
+func (server Server) unblockTeam(writer http.ResponseWriter, request *http.Request) {
+	server.setTeamBlocked(writer, request, false)
+}
+
+func (server Server) setTeamBlocked(writer http.ResponseWriter, request *http.Request, blocked bool) {
+	if !server.authorizeAdmin(request) || server.teamManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		TeamID string `json:"team_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.TeamID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'team_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.teamManager.SetTeamBlocked(request.Context(), input.TeamID, blocked)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update team", Type: "server_error", Code: "team_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated, "blocked": blocked})
+}
+
+func (server Server) deleteTeam(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.teamManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		TeamID string `json:"team_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.TeamID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'team_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deleted, err := server.teamManager.DeleteTeam(request.Context(), input.TeamID)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete team", Type: "server_error", Code: "team_deletion_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
+}
+
+func teamResponseFrom(team auth.ManagedTeam) teamResponse {
+	return teamResponse{TeamID: team.TeamID, TeamAlias: team.TeamAlias, Admins: team.Admins, Members: team.Members, Models: team.Models, Blocked: team.Blocked}
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
