@@ -41,6 +41,13 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if _, err := store.FindVirtualKey(context.Background(), record.TokenHash); err != nil {
 		t.Fatal(err)
 	}
+	updated, err := store.SetVirtualKeyBlocked(context.Background(), record.TokenHash, true)
+	if err != nil || !updated {
+		t.Fatalf("updated=%t err=%v", updated, err)
+	}
+	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "gateway-model"); err == nil {
+		t.Fatal("blocked key was accepted")
+	}
 	deleted, err := store.DeleteVirtualKey(context.Background(), record.TokenHash)
 	if err != nil || !deleted {
 		t.Fatalf("deleted=%t err=%v", deleted, err)

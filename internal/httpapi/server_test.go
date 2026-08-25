@@ -49,6 +49,20 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"key_alias":"integration"`) {
 		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
 	}
+	blockRequest := httptest.NewRequest(http.MethodPost, "/key/block", strings.NewReader(`{"key":"sk-test-key"}`))
+	blockRequest.Header.Set("Authorization", "Bearer master-key")
+	blocked := httptest.NewRecorder()
+	server.Handler().ServeHTTP(blocked, blockRequest)
+	if blocked.Code != http.StatusOK || !manager.records[auth.HashKey("sk-test-key")].Blocked {
+		t.Fatalf("block status=%d record=%#v", blocked.Code, manager.records[auth.HashKey("sk-test-key")])
+	}
+	unblockRequest := httptest.NewRequest(http.MethodPost, "/key/unblock", strings.NewReader(`{"key":"sk-test-key"}`))
+	unblockRequest.Header.Set("Authorization", "Bearer master-key")
+	unblocked := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unblocked, unblockRequest)
+	if unblocked.Code != http.StatusOK || manager.records[auth.HashKey("sk-test-key")].Blocked {
+		t.Fatalf("unblock status=%d record=%#v", unblocked.Code, manager.records[auth.HashKey("sk-test-key")])
+	}
 
 	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
@@ -345,6 +359,15 @@ func (manager *memoryKeyManager) DeleteVirtualKey(_ context.Context, tokenHash s
 		return false, nil
 	}
 	delete(manager.records, tokenHash)
+	return true, nil
+}
+func (manager *memoryKeyManager) SetVirtualKeyBlocked(_ context.Context, tokenHash string, blocked bool) (bool, error) {
+	record, found := manager.records[tokenHash]
+	if !found {
+		return false, nil
+	}
+	record.Blocked = blocked
+	manager.records[tokenHash] = record
 	return true, nil
 }
 

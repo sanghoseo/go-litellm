@@ -81,3 +81,14 @@ func (store VirtualKeyStore) DeleteVirtualKey(ctx context.Context, tokenHash str
 	}
 	return result.RowsAffected() > 0, nil
 }
+
+func (store VirtualKeyStore) SetVirtualKeyBlocked(ctx context.Context, tokenHash string, blocked bool) (bool, error) {
+	if store.pool == nil {
+		return false, auth.ErrInvalidVirtualKey
+	}
+	result, err := store.pool.Exec(ctx, `UPDATE "LiteLLM_VerificationToken" SET "blocked" = $2, "updated_at" = NOW() WHERE "token" = $1`, tokenHash, blocked)
+	if err != nil {
+		return false, fmt.Errorf("set virtual key blocked: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}

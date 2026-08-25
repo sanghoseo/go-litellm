@@ -117,6 +117,8 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /key/generate", server.generateKey)
 	mux.HandleFunc("GET /key/info", server.keyInfo)
 	mux.HandleFunc("POST /key/delete", server.deleteKey)
+	mux.HandleFunc("POST /key/block", server.blockKey)
+	mux.HandleFunc("POST /key/unblock", server.unblockKey)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
@@ -387,6 +389,34 @@ func (server Server) deleteKey(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
+}
+
+func (server Server) blockKey(writer http.ResponseWriter, request *http.Request) {
+	server.setKeyBlocked(writer, request, true)
+}
+
+func (server Server) unblockKey(writer http.ResponseWriter, request *http.Request) {
+	server.setKeyBlocked(writer, request, false)
+}
+
+func (server Server) setKeyBlocked(writer http.ResponseWriter, request *http.Request, blocked bool) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.Key == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'key'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.keyManager.SetVirtualKeyBlocked(request.Context(), auth.HashKey(input.Key), blocked)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update key", Type: "server_error", Code: "key_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated, "blocked": blocked})
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
