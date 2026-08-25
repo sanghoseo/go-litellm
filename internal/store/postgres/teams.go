@@ -22,6 +22,9 @@ func (store TeamStore) CreateTeam(ctx context.Context, team auth.ManagedTeam) er
 	if store.pool == nil || team.TeamID == "" {
 		return auth.ErrInvalidVirtualKey
 	}
+	team.Admins = nonNilStringSlice(team.Admins)
+	team.Members = nonNilStringSlice(team.Members)
+	team.Models = nonNilStringSlice(team.Models)
 	_, err := store.pool.Exec(ctx, `
 INSERT INTO "LiteLLM_TeamTable" ("team_id", "team_alias", "admins", "members", "models", "blocked")
 VALUES ($1, $2, $3, $4, $5, $6)`, team.TeamID, team.TeamAlias, team.Admins, team.Members, team.Models, team.Blocked)
@@ -29,6 +32,13 @@ VALUES ($1, $2, $3, $4, $5, $6)`, team.TeamID, team.TeamAlias, team.Admins, team
 		return fmt.Errorf("create team: %w", err)
 	}
 	return nil
+}
+
+func nonNilStringSlice(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (store TeamStore) GetTeam(ctx context.Context, teamID string) (auth.ManagedTeam, error) {

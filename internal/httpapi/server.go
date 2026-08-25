@@ -674,7 +674,14 @@ func (server Server) deleteTeam(writer http.ResponseWriter, request *http.Reques
 }
 
 func teamResponseFrom(team auth.ManagedTeam) teamResponse {
-	return teamResponse{TeamID: team.TeamID, TeamAlias: team.TeamAlias, Admins: team.Admins, Members: team.Members, Models: team.Models, Blocked: team.Blocked}
+	return teamResponse{TeamID: team.TeamID, TeamAlias: team.TeamAlias, Admins: nonNilStrings(team.Admins), Members: nonNilStrings(team.Members), Models: nonNilStrings(team.Models), Blocked: team.Blocked}
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)

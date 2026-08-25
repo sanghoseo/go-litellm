@@ -105,6 +105,9 @@ func TestTeamManagementLifecycle(t *testing.T) {
 	if created.Code != http.StatusOK || manager.teams["team-test"].TeamAlias != "Engineering" {
 		t.Fatalf("create status=%d teams=%#v", created.Code, manager.teams)
 	}
+	if strings.Contains(created.Body.String(), `"admins":null`) || strings.Contains(created.Body.String(), `"members":null`) {
+		t.Fatalf("create body must normalize arrays: %s", created.Body.String())
+	}
 	info := httptest.NewRequest(http.MethodGet, "/team/info?team_id=team-test", nil)
 	info.Header.Set("Authorization", "Bearer master-key")
 	infoResponse := httptest.NewRecorder()

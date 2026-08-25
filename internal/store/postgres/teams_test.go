@@ -28,12 +28,12 @@ func TestTeamStoreLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewTeamStore(pool)
-	team := auth.ManagedTeam{TeamID: "team-integration", TeamAlias: "Integration", Admins: []string{"admin"}, Members: []string{"member"}, Models: []string{"gateway-model"}}
+	team := auth.ManagedTeam{TeamID: "team-integration", TeamAlias: "Integration", Models: []string{"gateway-model"}}
 	if err := store.CreateTeam(context.Background(), team); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.GetTeam(context.Background(), team.TeamID)
-	if err != nil || loaded.TeamAlias != team.TeamAlias || len(loaded.Models) != 1 {
+	if err != nil || loaded.TeamAlias != team.TeamAlias || len(loaded.Models) != 1 || loaded.Admins == nil || loaded.Members == nil {
 		t.Fatalf("team=%#v err=%v", loaded, err)
 	}
 	teams, err := store.ListTeams(context.Background(), 10)
