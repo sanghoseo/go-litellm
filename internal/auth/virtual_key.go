@@ -16,6 +16,7 @@ type VirtualKey struct {
 	Models        []string
 	UserID        string
 	TeamID        string
+	TeamModels    []string
 	ProjectID     string
 	ProjectModels []string
 	ExpiresAt     *time.Time
@@ -24,15 +25,16 @@ type VirtualKey struct {
 }
 
 type ManagedVirtualKey struct {
-	TokenHash string
-	KeyAlias  string
-	Models    []string
-	UserID    string
-	TeamID    string
-	ProjectID string
-	ExpiresAt *time.Time
-	Blocked   bool
-	RPMLimit  *int64
+	TokenHash  string
+	KeyAlias   string
+	Models     []string
+	UserID     string
+	TeamID     string
+	TeamModels []string
+	ProjectID  string
+	ExpiresAt  *time.Time
+	Blocked    bool
+	RPMLimit   *int64
 }
 
 type ManagedVirtualKeyUpdate struct {
@@ -139,6 +141,9 @@ func (validator Validator) Validate(ctx context.Context, rawKey string, model st
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	if model != "" && len(virtualKey.Models) > 0 && !contains(virtualKey.Models, model) {
+		return VirtualKey{}, ErrInvalidVirtualKey
+	}
+	if model != "" && len(virtualKey.TeamModels) > 0 && !contains(virtualKey.TeamModels, model) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	if model != "" && len(virtualKey.ProjectModels) > 0 && !contains(virtualKey.ProjectModels, model) {
