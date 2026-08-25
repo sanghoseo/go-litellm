@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,11 @@ type ReadinessCheck interface {
 	Ping(context.Context) error
 }
 
+type ResponseCache interface {
+	Get(context.Context, string) ([]byte, error)
+	Set(context.Context, string, []byte, time.Duration) error
+}
+
 type Server struct {
 	config          config.Config
 	chatCompleter   providers.ChatCompleter
@@ -42,6 +48,12 @@ type Server struct {
 	usageRecorder   usage.Recorder
 	requestLimiter  RequestLimiter
 	readinessChecks []ReadinessCheck
+	responseCache   ResponseCache
+}
+
+func (server Server) WithResponseCache(cache ResponseCache) Server {
+	server.responseCache = cache
+	return server
 }
 
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
@@ -184,6 +196,16 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
+	cacheKey := server.cacheKey(body, virtualKey.TokenHash)
+	if cacheKey != "" {
+		if cached, err := server.responseCache.Get(request.Context(), cacheKey); err == nil {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.Header().Set("X-LiteLLM-Cache", "hit")
+			writer.WriteHeader(http.StatusOK)
+			_, _ = writer.Write(cached)
+			return
+		}
+	}
 
 	startedAt := time.Now().UTC()
 	upstream, err := server.chatCompleter.ChatCompletion(request.Context(), deployment, body)
@@ -197,7 +219,25 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	writer.WriteHeader(upstream.StatusCode)
 	responseBody := bytes.Buffer{}
 	_ = copyResponse(writer, io.TeeReader(upstream.Body, &responseBody))
+	if cacheKey != "" && upstream.StatusCode >= http.StatusOK && upstream.StatusCode < http.StatusMultipleChoices {
+		_ = server.responseCache.Set(request.Context(), cacheKey, responseBody.Bytes(), time.Minute)
+	}
 	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode)
+}
+
+func (server Server) cacheKey(body []byte, keyHash string) string {
+	if server.responseCache == nil || isStreamingRequest(body) {
+		return ""
+	}
+	hash := sha256.Sum256(append(append([]byte(nil), body...), []byte("\x00"+keyHash)...))
+	return fmt.Sprintf("litellm:response:%x", hash)
+}
+
+func isStreamingRequest(body []byte) bool {
+	var payload struct {
+		Stream bool `json:"stream"`
+	}
+	return json.Unmarshal(body, &payload) == nil && payload.Stream
 }
 
 func (server Server) recordUsage(ctx context.Context, keyHash string, deployment config.Model, body []byte, startedAt time.Time, statusCode int) {

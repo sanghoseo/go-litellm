@@ -13,7 +13,7 @@
 | B | `litellm/types/`, `types/` | `pkg/types/` | 핵심 OpenAI 타입 이식 |
 | C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 공개 Completion/Embedding/SSE SDK·router 기본 이식 |
 | D | `litellm/llms/**`, provider transformations | `internal/providers/` | adapter registry·OpenAI·Azure·Anthropic chat/SSE·Gemini·Bedrock Converse chat 이식 |
-| E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis·usage/spend·RPM·readiness 이식 |
+| E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis cache·usage/spend·RPM·readiness 이식 |
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | 대기 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/api/`, `internal/providers/` | 대기 |
 | H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | 핵심 운영 DDL 이식 |

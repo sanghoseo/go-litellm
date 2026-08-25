@@ -139,6 +139,23 @@ func TestChatCompletionsRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsReturnsCachedResponse(t *testing.T) {
+	cache := &memoryResponseCache{values: map[string][]byte{}}
+	server := NewServerWithRuntime(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}}, usageChatCompleter{}, nil, nil, nil).WithResponseCache(cache)
+	for requestNumber := 0; requestNumber < 2; requestNumber++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+		request.Header.Set("Authorization", "Bearer master-key")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("request %d status=%d", requestNumber, response.Code)
+		}
+		if requestNumber == 1 && response.Header().Get("X-LiteLLM-Cache") != "hit" {
+			t.Fatalf("cache header = %q", response.Header().Get("X-LiteLLM-Cache"))
+		}
+	}
+}
+
 func TestChatCompletionsAppliesVirtualKeyRateLimit(t *testing.T) {
 	limit := int64(1)
 	server := NewServerWithRuntime(
@@ -206,6 +223,20 @@ func (denyingLimiter) Allow(context.Context, string, int64, time.Duration) (bool
 type failingReadinessCheck struct{}
 
 func (failingReadinessCheck) Ping(context.Context) error { return errors.New("unavailable") }
+
+type memoryResponseCache struct{ values map[string][]byte }
+
+func (cache *memoryResponseCache) Get(_ context.Context, key string) ([]byte, error) {
+	value, found := cache.values[key]
+	if !found {
+		return nil, errors.New("cache miss")
+	}
+	return value, nil
+}
+func (cache *memoryResponseCache) Set(_ context.Context, key string, value []byte, _ time.Duration) error {
+	cache.values[key] = append([]byte(nil), value...)
+	return nil
+}
 
 func (completer deploymentCapturingCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
 	completer.bases <- deployment.APIBase
