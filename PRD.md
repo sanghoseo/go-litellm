@@ -1,8 +1,8 @@
-# LiteLLM OSS 단일 Go Proxy PRD
+# LiteLLM OSS 전체 Go 전환 PRD
 
 ## 1. 목적
 
-LiteLLM의 독립 Proxy 서버에 필요한 OSS 기능을 Go로 재구현한다. 결과물은 Python SDK를 제공하지 않고, OpenAI 호환 HTTP API를 제공하는 단일 Go 바이너리 `litellm-proxy`다
+LiteLLM의 OSS Python 구현 전체를 Go로 재구현한다. 최종 결과물은 Go SDK와 OpenAI 호환 HTTP API를 제공하며, 독립 Proxy는 단일 Go 바이너리 `litellm-proxy`로 배포한다
 
 개발과 배포에서 Python, uv 및 Python 런타임 의존성을 제거해 빌드, 로컬 실행, 배포와 운영을 단순화한다
 
@@ -23,12 +23,11 @@ LiteLLM의 독립 Proxy 서버에 필요한 OSS 기능을 Go로 재구현한다.
 
 ### 제외
 
-- Python SDK 및 Python SDK 호환 계층
 - `ui/` 및 관리 대시보드의 빌드·배포·재작성
 - `enterprise/`의 코드, API, 라이선스 기능과 Go 이식
 - SSO, SCIM, Enterprise 감사 로그, 관리형 파일·벡터 스토어와 Enterprise 전용 guardrail
 - P1 API: audio, image generation, rerank, batches, realtime/WebSocket, MCP, A2A
-- 모든 LiteLLM provider의 즉시 이식
+- Enterprise 전용 provider와 Enterprise 라이선스에 종속된 기능
 
 ## 3. 제품 원칙
 
@@ -38,7 +37,7 @@ LiteLLM의 독립 Proxy 서버에 필요한 OSS 기능을 Go로 재구현한다.
 - PostgreSQL은 영속 데이터의 source of truth이며 Redis는 cache와 조정 상태만 보관한다
 - 설정에 지원하지 않는 Python 전용 필드가 있으면 시작 시 명확하게 실패하거나 경고한다. 무시해서 동작 의미가 달라져서는 안 된다
 - Enterprise 코드는 라이선스 경계를 유지하기 위해 빌드, 바이너리 및 런타임에서 제외한다
-- 원본 Python 파일 구조를 기계적으로 복제하지 않는다. 공개 계약과 단일 책임을 기준으로 idiomatic Go 패키지로 재구성한다
+- 원본 Python 파일 구조를 기계적으로 복제하지 않는다. 공개 계약과 단일 책임을 기준으로 idiomatic Go 패키지로 재구성한다. 원본 파일과 Go 구현의 관계는 `MIGRATION_MANIFEST.md`에서 추적한다
 
 ## 4. 사용자 시나리오
 
