@@ -13,14 +13,19 @@ type Router struct {
 	deployments map[string][]config.Model
 	mu          sync.Mutex
 	next        map[string]uint64
+	aliases     map[string]string
 }
 
 func New(models []config.Model) *Router {
+	return NewWithAliases(models, nil)
+}
+
+func NewWithAliases(models []config.Model, aliases map[string]string) *Router {
 	deployments := make(map[string][]config.Model)
 	for _, model := range models {
 		deployments[model.Name] = append(deployments[model.Name], model)
 	}
-	return &Router{deployments: deployments, next: make(map[string]uint64)}
+	return &Router{deployments: deployments, next: make(map[string]uint64), aliases: aliases}
 }
 
 func (router *Router) Select(modelName string) (config.Model, error) {
@@ -39,6 +44,9 @@ func (router *Router) selectExcluding(modelName string, excluded map[string]stru
 	router.mu.Lock()
 	defer router.mu.Unlock()
 
+	if alias, found := router.aliases[modelName]; found {
+		modelName = alias
+	}
 	models := router.deployments[modelName]
 	if len(models) == 0 {
 		return config.Model{}, ErrModelNotFound

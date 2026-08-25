@@ -46,3 +46,11 @@ func TestSelectUnknownModel(t *testing.T) {
 		t.Fatalf("error = %v, want ErrModelNotFound", err)
 	}
 }
+
+func TestSelectResolvesModelGroupAlias(t *testing.T) {
+	router := NewWithAliases([]config.Model{{Name: "deployment", Model: "openai/gpt-5"}}, map[string]string{"public-name": "deployment"})
+	selected, err := router.Select("public-name")
+	if err != nil || selected.Name != "deployment" {
+		t.Fatalf("selected = %#v, err = %v", selected, err)
+	}
+}

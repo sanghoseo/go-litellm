@@ -39,7 +39,7 @@ func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter)
 	if len(completers) > 0 {
 		chatCompleter = completers[0]
 	}
-	server := Server{config: proxyConfig, chatCompleter: chatCompleter, router: routing.New(proxyConfig.Models)}
+	server := Server{config: proxyConfig, chatCompleter: chatCompleter, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
 	server.setOptionalCompleters(chatCompleter)
 	return server
 }
@@ -49,7 +49,7 @@ func NewServerWithVirtualKeyValidator(proxyConfig config.Config, completer provi
 }
 
 func NewServerWithDependencies(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, router: routing.New(proxyConfig.Models)}
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
 	server.setOptionalCompleters(completer)
 	return server
 }

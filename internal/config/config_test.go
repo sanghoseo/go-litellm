@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadResolvesEnvironmentReferences(t *testing.T) {
@@ -32,6 +33,34 @@ general_settings:
 	}
 	if loaded.Models[0].APIKey != "test-key" {
 		t.Fatalf("APIKey = %q, want test-key", loaded.Models[0].APIKey)
+	}
+}
+
+func TestLoadPreservesRouterAndRetrySettings(t *testing.T) {
+	configPath := writeConfig(t, `
+model_list:
+  - model_name: deployment
+    litellm_params:
+      model: openai/gpt-test
+      timeout: 2.5
+      stream_timeout: 3
+      num_retries: 4
+litellm_settings:
+  request_timeout: 10
+  num_retries: 2
+router_settings:
+  model_group_alias:
+    public-name: deployment
+`)
+	loaded, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.RequestTimeout != 10*time.Second || loaded.NumRetries != 2 || loaded.ModelAliases["public-name"] != "deployment" {
+		t.Fatalf("config = %#v", loaded)
+	}
+	if loaded.Models[0].Timeout != 2500*time.Millisecond || loaded.Models[0].StreamTimeout != 3*time.Second || loaded.Models[0].NumRetries != 4 {
+		t.Fatalf("model = %#v", loaded.Models[0])
 	}
 }
 
