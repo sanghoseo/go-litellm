@@ -16,6 +16,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/httpapi"
 	"github.com/BerriAI/litellm/go-proxy/internal/localdev"
+	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
 	"github.com/BerriAI/litellm/go-proxy/internal/store/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,9 +69,10 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		keyValidator = auth.NewValidator(postgres.NewVirtualKeyStore(database))
 	}
 
+	providerRegistry := providers.NewRegistry(map[string]providers.Client{"openai": openai.NewClient(nil)})
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithVirtualKeyValidator(proxyConfig, openai.NewClient(nil), keyValidator).Handler(),
+		Handler:           httpapi.NewServerWithVirtualKeyValidator(proxyConfig, providerRegistry, keyValidator).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
