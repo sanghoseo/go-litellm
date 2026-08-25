@@ -98,21 +98,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		readinessChecks = append(readinessChecks, redisClient)
 	}
 
-	openAICompatible := openai.NewClient(nil)
-	providerRegistry := providers.NewRegistry(map[string]providers.Client{
-		"anthropic":   anthropic.NewClient(nil),
-		"azure":       azure.NewClient(nil),
-		"bedrock":     bedrock.NewClient(),
-		"cerebras":    openAICompatible,
-		"deepseek":    openAICompatible,
-		"gemini":      gemini.NewClient(nil),
-		"groq":        openAICompatible,
-		"mistral":     openAICompatible,
-		"openai":      openAICompatible,
-		"openrouter":  openrouter.NewClient(nil),
-		"perplexity":  openAICompatible,
-		"together_ai": openAICompatible,
-	})
+	providerRegistry := newProviderRegistry()
 	server := &http.Server{
 		Addr:              listenAddress,
 		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithVirtualKeyManager(keyManager).Handler(),
@@ -143,4 +129,30 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	}
 
 	return nil
+}
+
+func newProviderRegistry() providers.Registry {
+	openAICompatible := openai.NewClient(nil)
+	return providers.NewRegistry(map[string]providers.Client{
+		"anyscale":     openAICompatible,
+		"anthropic":    anthropic.NewClient(nil),
+		"azure":        azure.NewClient(nil),
+		"bedrock":      bedrock.NewClient(),
+		"cerebras":     openAICompatible,
+		"databricks":   openAICompatible,
+		"deepseek":     openAICompatible,
+		"fireworks_ai": openAICompatible,
+		"gemini":       gemini.NewClient(nil),
+		"groq":         openAICompatible,
+		"mistral":      openAICompatible,
+		"nvidia_nim":   openAICompatible,
+		"ollama":       openAICompatible,
+		"openai":       openAICompatible,
+		"openrouter":   openrouter.NewClient(nil),
+		"perplexity":   openAICompatible,
+		"sambanova":    openAICompatible,
+		"together_ai":  openAICompatible,
+		"vllm":         openAICompatible,
+		"xai":          openAICompatible,
+	})
 }

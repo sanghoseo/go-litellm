@@ -31,6 +31,11 @@ func NewRegistry(clients map[string]Client) Registry {
 	return Registry{clients: copyOfClients}
 }
 
+func (registry Registry) HasProvider(name string) bool {
+	client, found := registry.clients[strings.ToLower(name)]
+	return found && client != nil
+}
+
 func (registry Registry) ChatCompletion(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
 	client, err := registry.clientFor(deployment)
 	if err != nil {
