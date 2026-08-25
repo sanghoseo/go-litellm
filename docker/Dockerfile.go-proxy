@@ -13,6 +13,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/litellm-proxy ./cm
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /out/litellm-proxy /usr/local/bin/litellm-proxy
+COPY config.yaml /etc/litellm/config.yaml
 
 EXPOSE 4000
 
