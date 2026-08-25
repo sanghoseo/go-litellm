@@ -111,6 +111,35 @@ func TestClientSpeechReadsBinaryResponse(t *testing.T) {
 	}
 }
 
+func TestClientFileReadAndDeleteOperations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "GET /v1/files":
+			_, _ = writer.Write([]byte(`{"object":"list","data":[{"id":"file-1","filename":"test.jsonl"}]}`))
+		case "GET /v1/files/file-1":
+			_, _ = writer.Write([]byte(`{"id":"file-1","filename":"test.jsonl"}`))
+		case "DELETE /v1/files/file-1":
+			_, _ = writer.Write([]byte(`{"id":"file-1","object":"file","deleted":true}`))
+		default:
+			t.Fatalf("request=%s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := Client{BaseURL: server.URL + "/v1", HTTPClient: server.Client()}
+	list, err := client.ListFiles(context.Background())
+	if err != nil || len(list.Data) != 1 || list.Data[0].ID != "file-1" {
+		t.Fatalf("list=%#v err=%v", list, err)
+	}
+	file, err := client.RetrieveFile(context.Background(), "file-1")
+	if err != nil || file.Filename != "test.jsonl" {
+		t.Fatalf("file=%#v err=%v", file, err)
+	}
+	deleted, err := client.DeleteFile(context.Background(), "file-1")
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("deleted=%#v err=%v", deleted, err)
+	}
+}
+
 func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {

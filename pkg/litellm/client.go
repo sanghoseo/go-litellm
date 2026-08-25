@@ -83,6 +83,30 @@ func (client Client) Speech(ctx context.Context, request proxytpes.SpeechRequest
 	return client.postBytes(ctx, "audio/speech", request)
 }
 
+func (client Client) ListFiles(ctx context.Context) (proxytpes.FileListResponse, error) {
+	response := proxytpes.FileListResponse{}
+	if err := client.get(ctx, "files", &response); err != nil {
+		return proxytpes.FileListResponse{}, err
+	}
+	return response, nil
+}
+
+func (client Client) RetrieveFile(ctx context.Context, fileID string) (proxytpes.FileObject, error) {
+	response := proxytpes.FileObject{}
+	if err := client.get(ctx, "files/"+url.PathEscape(fileID), &response); err != nil {
+		return proxytpes.FileObject{}, err
+	}
+	return response, nil
+}
+
+func (client Client) DeleteFile(ctx context.Context, fileID string) (proxytpes.FileDeleteResponse, error) {
+	response := proxytpes.FileDeleteResponse{}
+	if err := client.requestJSON(ctx, http.MethodDelete, "files/"+url.PathEscape(fileID), nil, &response); err != nil {
+		return proxytpes.FileDeleteResponse{}, err
+	}
+	return response, nil
+}
+
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)
@@ -230,19 +254,33 @@ func readTextStream(body io.ReadCloser, chunks chan<- proxytpes.TextCompletionCh
 }
 
 func (client Client) post(ctx context.Context, endpoint string, payload any, output any) error {
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("encode request: %w", err)
+	return client.requestJSON(ctx, http.MethodPost, endpoint, payload, output)
+}
+
+func (client Client) get(ctx context.Context, endpoint string, output any) error {
+	return client.requestJSON(ctx, http.MethodGet, endpoint, nil, output)
+}
+
+func (client Client) requestJSON(ctx context.Context, method string, endpoint string, payload any, output any) error {
+	var requestBody io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("encode request: %w", err)
+		}
+		requestBody = bytes.NewReader(encoded)
 	}
 	endpointURL, err := client.endpointURL(endpoint)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+	request, err := http.NewRequestWithContext(ctx, method, endpointURL, requestBody)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	if client.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+client.APIKey)
 	}
@@ -255,7 +293,7 @@ func (client Client) post(ctx context.Context, endpoint string, payload any, out
 		return fmt.Errorf("send request: %w", err)
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
+	responseBody, err := io.ReadAll(response.Body)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
@@ -265,14 +303,14 @@ func (client Client) post(ctx context.Context, endpoint string, payload any, out
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		_ = json.Unmarshal(body, &errorResponse)
+		_ = json.Unmarshal(responseBody, &errorResponse)
 		message := errorResponse.Error.Message
 		if message == "" {
-			message = string(body)
+			message = string(responseBody)
 		}
 		return &APIError{StatusCode: response.StatusCode, Message: message}
 	}
-	if err := json.Unmarshal(body, output); err != nil {
+	if err := json.Unmarshal(responseBody, output); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
