@@ -12,10 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/httpapi"
 	"github.com/BerriAI/litellm/go-proxy/internal/localdev"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
+	"github.com/BerriAI/litellm/go-proxy/internal/store/postgres"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -51,9 +54,23 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		proxyConfig = proxyConfig.WithRuntime(dependencies.DatabaseURL, dependencies.RedisURL)
 	}
 
+	var database *pgxpool.Pool
+	var keyValidator httpapi.VirtualKeyValidator
+	if proxyConfig.DatabaseURL != "" {
+		database, err = pgxpool.New(context.Background(), proxyConfig.DatabaseURL)
+		if err != nil {
+			return fmt.Errorf("connect PostgreSQL: %w", err)
+		}
+		defer database.Close()
+		if err := postgres.EnsureCoreSchema(context.Background(), database); err != nil {
+			return fmt.Errorf("initialize PostgreSQL schema: %w", err)
+		}
+		keyValidator = auth.NewValidator(postgres.NewVirtualKeyStore(database))
+	}
+
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServer(proxyConfig, openai.NewClient(nil)).Handler(),
+		Handler:           httpapi.NewServerWithVirtualKeyValidator(proxyConfig, openai.NewClient(nil), keyValidator).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)

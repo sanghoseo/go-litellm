@@ -17,3 +17,11 @@ type Response struct {
 type ChatCompleter interface {
 	ChatCompletion(context.Context, config.Model, []byte) (Response, error)
 }
+
+type ResponseCreator interface {
+	CreateResponse(context.Context, config.Model, []byte) (Response, error)
+}
+
+type Embedder interface {
+	CreateEmbedding(context.Context, config.Model, []byte) (Response, error)
+}

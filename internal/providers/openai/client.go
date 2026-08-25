@@ -25,7 +25,19 @@ func NewClient(httpClient *http.Client) Client {
 }
 
 func (client Client) ChatCompletion(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
-	targetURL, err := chatCompletionsURL(deployment.APIBase)
+	return client.request(ctx, deployment, body, "chat/completions")
+}
+
+func (client Client) CreateResponse(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
+	return client.request(ctx, deployment, body, "responses")
+}
+
+func (client Client) CreateEmbedding(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
+	return client.request(ctx, deployment, body, "embeddings")
+}
+
+func (client Client) request(ctx context.Context, deployment config.Model, body []byte, endpoint string) (providers.Response, error) {
+	targetURL, err := endpointURL(deployment.APIBase, endpoint)
 	if err != nil {
 		return providers.Response{}, err
 	}
@@ -53,7 +65,7 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	return providers.Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil
 }
 
-func chatCompletionsURL(apiBase string) (string, error) {
+func endpointURL(apiBase string, endpoint string) (string, error) {
 	base := apiBase
 	if base == "" {
 		base = "https://api.openai.com/v1"
@@ -62,7 +74,7 @@ func chatCompletionsURL(apiBase string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("invalid OpenAI api_base %q", apiBase)
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/chat/completions"
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + endpoint
 	return parsed.String(), nil
 }
 

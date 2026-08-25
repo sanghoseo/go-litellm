@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 )
@@ -15,6 +16,46 @@ import (
 func TestModelsRequiresMasterKey(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gpt-test", Model: "openai/gpt-test"}}})
 	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
+	server := NewServerWithVirtualKeyValidator(
+		config.Config{Models: []config.Model{
+			{Name: "gateway-model", Model: "openai/gpt-5"},
+			{Name: "other-model", Model: "openai/gpt-5-mini"},
+		}},
+		stubChatCompleter{},
+		stubVirtualKeyValidator{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestChatCompletionsRejectsVirtualKeyForOtherModel(t *testing.T) {
+	server := NewServerWithVirtualKeyValidator(
+		config.Config{Models: []config.Model{
+			{Name: "gateway-model", Model: "openai/gpt-5"},
+			{Name: "other-model", Model: "openai/gpt-5-mini"},
+		}},
+		stubChatCompleter{},
+		stubVirtualKeyValidator{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"other-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
 	response := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(response, request)
@@ -72,6 +113,15 @@ func TestChatCompletionsForwardsConfiguredDeployment(t *testing.T) {
 }
 
 type stubChatCompleter struct{}
+
+type stubVirtualKeyValidator struct{}
+
+func (stubVirtualKeyValidator) Validate(_ context.Context, rawKey string, model string) (auth.VirtualKey, error) {
+	if rawKey != "sk-virtual-key" || (model != "" && model != "gateway-model") {
+		return auth.VirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	return auth.VirtualKey{Models: []string{"gateway-model"}}, nil
+}
 
 func (stubChatCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
 	if deployment.Name != "gateway-model" {

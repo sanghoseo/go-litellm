@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -9,13 +10,21 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 )
 
+type VirtualKeyValidator interface {
+	Validate(context.Context, string, string) (auth.VirtualKey, error)
+}
+
 type Server struct {
 	config        config.Config
 	chatCompleter providers.ChatCompleter
+	responseMaker providers.ResponseCreator
+	embedder      providers.Embedder
+	keyValidator  VirtualKeyValidator
 }
 
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
@@ -23,7 +32,24 @@ func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter)
 	if len(completers) > 0 {
 		chatCompleter = completers[0]
 	}
-	return Server{config: proxyConfig, chatCompleter: chatCompleter}
+	server := Server{config: proxyConfig, chatCompleter: chatCompleter}
+	server.setOptionalCompleters(chatCompleter)
+	return server
+}
+
+func NewServerWithVirtualKeyValidator(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator) Server {
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator}
+	server.setOptionalCompleters(completer)
+	return server
+}
+
+func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
+	if responseMaker, ok := completer.(providers.ResponseCreator); ok {
+		server.responseMaker = responseMaker
+	}
+	if embedder, ok := completer.(providers.Embedder); ok {
+		server.embedder = embedder
+	}
 }
 
 func (server Server) Handler() http.Handler {
@@ -32,14 +58,65 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health/readiness", server.health)
 	mux.HandleFunc("GET /v1/models", server.models)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
+	mux.HandleFunc("POST /v1/responses", server.responses)
+	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	return mux
 }
 
-func (server Server) chatCompletions(writer http.ResponseWriter, request *http.Request) {
-	if !server.authorized(request) {
+func (server Server) responses(writer http.ResponseWriter, request *http.Request) {
+	if server.responseMaker == nil {
+		server.providerUnavailable(writer, "No responses provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, server.responseMaker.CreateResponse)
+}
+
+func (server Server) embeddings(writer http.ResponseWriter, request *http.Request) {
+	if server.embedder == nil {
+		server.providerUnavailable(writer, "No embedding provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, server.embedder.CreateEmbedding)
+}
+
+type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
+
+func (server Server) forwardModelRequest(writer http.ResponseWriter, request *http.Request, completer modelRequestCompleter) {
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 10<<20))
+	if err != nil {
+		writeJSON(writer, http.StatusRequestEntityTooLarge, openAIError{Message: "Request body exceeds 10 MiB", Type: "invalid_request_error", Code: "request_too_large"})
+		return
+	}
+	modelName, err := requestedModel(body)
+	if err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: err.Error(), Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deployment, found := server.deploymentFor(modelName)
+	if !found {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
+		return
+	}
+	if _, authorized := server.authorize(request, modelName); !authorized {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
+	upstream, err := completer(request.Context(), deployment, body)
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
+		return
+	}
+	defer upstream.Body.Close()
+	copyResponseHeaders(writer.Header(), upstream.Header)
+	writer.WriteHeader(upstream.StatusCode)
+	_ = copyResponse(writer, upstream.Body)
+}
+
+func (server Server) providerUnavailable(writer http.ResponseWriter, message string) {
+	writeJSON(writer, http.StatusServiceUnavailable, openAIError{Message: message, Type: "server_error", Code: "provider_unavailable"})
+}
+
+func (server Server) chatCompletions(writer http.ResponseWriter, request *http.Request) {
 	if server.chatCompleter == nil {
 		writeJSON(writer, http.StatusServiceUnavailable, openAIError{Message: "No chat completion provider is configured", Type: "server_error", Code: "provider_unavailable"})
 		return
@@ -58,6 +135,10 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	deployment, found := server.deploymentFor(modelName)
 	if !found {
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
+		return
+	}
+	if _, authorized := server.authorize(request, modelName); !authorized {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
 
@@ -132,13 +213,17 @@ func (server Server) health(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (server Server) models(writer http.ResponseWriter, request *http.Request) {
-	if !server.authorized(request) {
+	virtualKey, authorized := server.authorize(request, "")
+	if !authorized {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
 
 	models := make([]modelResponse, 0, len(server.config.Models))
 	for _, configuredModel := range server.config.Models {
+		if len(virtualKey.Models) > 0 && !contains(virtualKey.Models, configuredModel.Name) {
+			continue
+		}
 		models = append(models, modelResponse{
 			ID:      configuredModel.Name,
 			Object:  "model",
@@ -150,16 +235,36 @@ func (server Server) models(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, modelListResponse{Object: "list", Data: models})
 }
 
-func (server Server) authorized(request *http.Request) bool {
-	if server.config.MasterKey == "" {
-		return true
+func (server Server) authorize(request *http.Request, model string) (auth.VirtualKey, bool) {
+	provided, found := bearerToken(request)
+	if server.config.MasterKey != "" && found && len(provided) == len(server.config.MasterKey) && subtle.ConstantTimeCompare([]byte(provided), []byte(server.config.MasterKey)) == 1 {
+		return auth.VirtualKey{}, true
 	}
+	if server.keyValidator != nil && found {
+		virtualKey, err := server.keyValidator.Validate(request.Context(), provided, model)
+		if err == nil {
+			return virtualKey, true
+		}
+	}
+	return auth.VirtualKey{}, server.config.MasterKey == "" && server.keyValidator == nil
+}
 
-	provided := strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
-	if len(provided) != len(server.config.MasterKey) {
-		return false
+func bearerToken(request *http.Request) (string, bool) {
+	authorization := request.Header.Get("Authorization")
+	if !strings.HasPrefix(authorization, "Bearer ") {
+		return "", false
 	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(server.config.MasterKey)) == 1
+	provided := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+	return provided, provided != ""
+}
+
+func contains(models []string, expected string) bool {
+	for _, model := range models {
+		if model == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func providerName(model string) string {

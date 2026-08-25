@@ -42,7 +42,7 @@ func (validator Validator) Validate(ctx context.Context, rawKey string, model st
 	if virtualKey.Blocked || (virtualKey.ExpiresAt != nil && !virtualKey.ExpiresAt.After(time.Now())) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
-	if len(virtualKey.Models) > 0 && !contains(virtualKey.Models, model) {
+	if model != "" && len(virtualKey.Models) > 0 && !contains(virtualKey.Models, model) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	return virtualKey, nil
