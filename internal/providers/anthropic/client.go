@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/observability"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 	proxytpes "github.com/BerriAI/litellm/go-proxy/pkg/types"
 )
@@ -41,6 +42,9 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("anthropic-version", "2023-06-01")
+	if requestID := observability.RequestID(ctx); requestID != "" {
+		request.Header.Set("X-Request-Id", requestID)
+	}
 	if deployment.APIKey != "" {
 		request.Header.Set("x-api-key", deployment.APIKey)
 	}

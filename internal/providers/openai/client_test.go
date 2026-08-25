@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/observability"
 )
 
 func TestChatCompletionUsesDeploymentCredentialsAndModel(t *testing.T) {
@@ -17,6 +18,9 @@ func TestChatCompletionUsesDeploymentCredentialsAndModel(t *testing.T) {
 		}
 		if authorization := request.Header.Get("Authorization"); authorization != "Bearer upstream-key" {
 			t.Fatalf("authorization = %q, want upstream credential", authorization)
+		}
+		if request.Header.Get("X-Request-Id") != "request-123" {
+			t.Fatalf("request id = %q", request.Header.Get("X-Request-Id"))
 		}
 		body, err := io.ReadAll(request.Body)
 		if err != nil {
@@ -31,7 +35,7 @@ func TestChatCompletionUsesDeploymentCredentialsAndModel(t *testing.T) {
 	defer upstream.Close()
 
 	client := NewClient(upstream.Client())
-	response, err := client.ChatCompletion(context.Background(), config.Model{
+	response, err := client.ChatCompletion(observability.WithRequestID(context.Background(), "request-123"), config.Model{
 		Name:    "gateway-model",
 		Model:   "openai/gpt-5",
 		APIKey:  "upstream-key",

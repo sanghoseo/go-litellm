@@ -96,6 +96,17 @@ func TestHealthDoesNotRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestHandlerPreservesRequestID(t *testing.T) {
+	server := NewServer(config.Config{})
+	request := httptest.NewRequest(http.MethodGet, "/health/liveliness", nil)
+	request.Header.Set("X-Request-Id", "request-123")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Header().Get("X-Request-Id") != "request-123" {
+		t.Fatalf("request id = %q", response.Header().Get("X-Request-Id"))
+	}
+}
+
 func TestReadinessReportsUnavailableDependency(t *testing.T) {
 	server := NewServerWithRuntime(config.Config{}, nil, nil, nil, nil, failingReadinessCheck{})
 	request := httptest.NewRequest(http.MethodGet, "/health/readiness", nil)

@@ -99,11 +99,23 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
+	handler := server.withRequestID(mux)
 	if server.metrics == nil {
-		return mux
+		return handler
 	}
 	mux.Handle("GET /metrics", server.metrics.Handler())
-	return server.metrics.Wrap(mux)
+	return server.metrics.Wrap(handler)
+}
+
+func (server Server) withRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestID := request.Header.Get("X-Request-Id")
+		if requestID == "" {
+			requestID, _ = litellm.UUID4()
+		}
+		writer.Header().Set("X-Request-Id", requestID)
+		next.ServeHTTP(writer, request.WithContext(observability.WithRequestID(request.Context(), requestID)))
+	})
 }
 
 func (server Server) responses(writer http.ResponseWriter, request *http.Request) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/observability"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 )
 
@@ -53,6 +54,9 @@ func (client Client) request(ctx context.Context, deployment config.Model, body 
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	if requestID := observability.RequestID(ctx); requestID != "" {
+		request.Header.Set("X-Request-Id", requestID)
+	}
 	if deployment.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+deployment.APIKey)
 	}
