@@ -226,7 +226,7 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	}
 
 	startedAt := time.Now().UTC()
-	upstream, err := server.chatCompleter.ChatCompletion(request.Context(), deployment, body)
+	upstream, err := server.completeWithFallback(request.Context(), modelName, deployment, body)
 	if err != nil {
 		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
 		return
@@ -241,6 +241,25 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		_ = server.responseCache.Set(request.Context(), cacheKey, responseBody.Bytes(), time.Minute)
 	}
 	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode)
+}
+
+func (server Server) completeWithFallback(ctx context.Context, modelName string, deployment config.Model, body []byte) (providers.Response, error) {
+	failed := []config.Model{}
+	for {
+		response, err := server.chatCompleter.ChatCompletion(ctx, deployment, body)
+		if err == nil {
+			return response, nil
+		}
+		failed = append(failed, deployment)
+		if server.router == nil {
+			return providers.Response{}, err
+		}
+		next, fallbackErr := server.router.Fallback(modelName, failed)
+		if fallbackErr != nil {
+			return providers.Response{}, err
+		}
+		deployment = next
+	}
 }
 
 func (server Server) cacheKey(body []byte, keyHash string) string {

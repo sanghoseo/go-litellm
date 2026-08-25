@@ -200,10 +200,33 @@ func TestChatCompletionsRoundRobinsConfiguredDeployments(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsFallsBackAfterProviderError(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://one.example"},
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://two.example"},
+	}}, fallbackChatCompleter{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != `{"deployment":"two"}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 type stubChatCompleter struct{}
 
 type deploymentCapturingCompleter struct {
 	bases chan string
+}
+
+type fallbackChatCompleter struct{}
+
+func (fallbackChatCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
+	if deployment.APIBase == "https://one.example" {
+		return providers.Response{}, errors.New("first deployment failed")
+	}
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"deployment":"two"}`))}, nil
 }
 
 type usageChatCompleter struct{}
