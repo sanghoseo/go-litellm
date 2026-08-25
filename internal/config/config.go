@@ -22,6 +22,7 @@ type Config struct {
 	RequestTimeout time.Duration
 	NumRetries     int
 	ModelAliases   map[string]string
+	ResourceModel  string
 }
 
 type Model struct {
@@ -59,7 +60,8 @@ type modelParams struct {
 }
 
 type generalSettings struct {
-	MasterKey string `yaml:"master_key"`
+	MasterKey     string `yaml:"master_key"`
+	ResourceModel string `yaml:"resource_model"`
 }
 
 type litellmSettings struct {
@@ -121,6 +123,7 @@ func Load(path string) (Config, error) {
 		RequestTimeout: secondsDuration(parsed.LiteLLMSettings.RequestTimeout),
 		NumRetries:     parsed.LiteLLMSettings.NumRetries,
 		ModelAliases:   parsed.RouterSettings.ModelGroupAlias,
+		ResourceModel:  parsed.GeneralSettings.ResourceModel,
 	}, nil
 }
 

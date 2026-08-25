@@ -6,6 +6,7 @@ model_list:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
+  resource_model: gpt-4o-mini
 
 litellm_settings:
   request_timeout: 120

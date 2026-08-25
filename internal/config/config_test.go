@@ -52,12 +52,14 @@ litellm_settings:
 router_settings:
   model_group_alias:
     public-name: deployment
+general_settings:
+  resource_model: public-name
 `)
 	loaded, err := Load(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.RequestTimeout != 10*time.Second || loaded.NumRetries != 2 || loaded.ModelAliases["public-name"] != "deployment" {
+	if loaded.RequestTimeout != 10*time.Second || loaded.NumRetries != 2 || loaded.ModelAliases["public-name"] != "deployment" || loaded.ResourceModel != "public-name" {
 		t.Fatalf("config = %#v", loaded)
 	}
 	if loaded.Models[0].Timeout != 2500*time.Millisecond || loaded.Models[0].StreamTimeout != 3*time.Second || loaded.Models[0].NumRetries != 4 || loaded.Models[0].AWSRegion != "us-east-1" {

@@ -330,7 +330,10 @@ func TestSpeechForwardsOpenAICompatibleRequest(t *testing.T) {
 func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 	provider := &resourceProvider{}
 	server := NewServer(
-		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "resource-model", Model: "openai/gpt-5"}}},
+		config.Config{MasterKey: "master-key", ResourceModel: "resource-model", Models: []config.Model{
+			{Name: "chat-model", Model: "openai/gpt-5"},
+			{Name: "resource-model", Model: "openai/gpt-4o-mini"},
+		}},
 		provider,
 	)
 	for _, testCase := range []struct {

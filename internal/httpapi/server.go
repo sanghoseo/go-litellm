@@ -680,6 +680,9 @@ func (server Server) deploymentFor(modelName string) (config.Model, bool) {
 }
 
 func (server Server) defaultDeployment() (config.Model, bool) {
+	if server.config.ResourceModel != "" {
+		return server.deploymentFor(server.config.ResourceModel)
+	}
 	if len(server.config.Models) == 0 {
 		return config.Model{}, false
 	}
