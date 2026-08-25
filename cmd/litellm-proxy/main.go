@@ -20,6 +20,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/anthropic"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/azure"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/bedrock"
+	"github.com/BerriAI/litellm/go-proxy/internal/providers/cohere"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/gemini"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openrouter"
@@ -157,6 +158,7 @@ func newProviderRegistry() providers.Registry {
 		"azure":        azure.NewClient(nil),
 		"bedrock":      bedrock.NewClient(),
 		"cerebras":     openAICompatible,
+		"cohere":       cohere.NewClient(nil),
 		"databricks":   openAICompatible,
 		"deepseek":     openAICompatible,
 		"fireworks_ai": openAICompatible,
