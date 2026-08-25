@@ -112,7 +112,35 @@ func TestChatCompletionsForwardsConfiguredDeployment(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsRoundRobinsConfiguredDeployments(t *testing.T) {
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{
+			{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://one.example"},
+			{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://two.example"},
+		}},
+		deploymentCapturingCompleter{bases: make(chan string, 2)},
+	)
+	for range 2 {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+		request.Header.Set("Authorization", "Bearer master-key")
+		server.Handler().ServeHTTP(httptest.NewRecorder(), request)
+	}
+	completer := server.chatCompleter.(deploymentCapturingCompleter)
+	if first, second := <-completer.bases, <-completer.bases; first != "https://one.example" || second != "https://two.example" {
+		t.Fatalf("deployment bases = %q, %q, want round robin", first, second)
+	}
+}
+
 type stubChatCompleter struct{}
+
+type deploymentCapturingCompleter struct {
+	bases chan string
+}
+
+func (completer deploymentCapturingCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
+	completer.bases <- deployment.APIBase
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+}
 
 type stubVirtualKeyValidator struct{}
 

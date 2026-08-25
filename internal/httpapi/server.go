@@ -13,6 +13,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
+	"github.com/BerriAI/litellm/go-proxy/internal/routing"
 )
 
 type VirtualKeyValidator interface {
@@ -25,6 +26,7 @@ type Server struct {
 	responseMaker providers.ResponseCreator
 	embedder      providers.Embedder
 	keyValidator  VirtualKeyValidator
+	router        *routing.Router
 }
 
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
@@ -32,13 +34,13 @@ func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter)
 	if len(completers) > 0 {
 		chatCompleter = completers[0]
 	}
-	server := Server{config: proxyConfig, chatCompleter: chatCompleter}
+	server := Server{config: proxyConfig, chatCompleter: chatCompleter, router: routing.New(proxyConfig.Models)}
 	server.setOptionalCompleters(chatCompleter)
 	return server
 }
 
 func NewServerWithVirtualKeyValidator(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator}
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, router: routing.New(proxyConfig.Models)}
 	server.setOptionalCompleters(completer)
 	return server
 }
@@ -170,12 +172,11 @@ func requestedModel(body []byte) (string, error) {
 }
 
 func (server Server) deploymentFor(modelName string) (config.Model, bool) {
-	for _, configuredModel := range server.config.Models {
-		if configuredModel.Name == modelName {
-			return configuredModel, true
-		}
+	if server.router == nil {
+		return config.Model{}, false
 	}
-	return config.Model{}, false
+	model, err := server.router.Select(modelName)
+	return model, err == nil
 }
 
 func copyResponseHeaders(destination http.Header, source http.Header) {
