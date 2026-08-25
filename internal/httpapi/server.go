@@ -277,6 +277,14 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/evals/{evalID}/runs/{runID}", server.evalRun)
 	mux.HandleFunc("POST /v1/evals/{evalID}/runs/{runID}", server.evalRun)
 	mux.HandleFunc("DELETE /v1/evals/{evalID}/runs/{runID}", server.evalRun)
+	mux.HandleFunc("GET /v1/videos", server.videos)
+	mux.HandleFunc("POST /v1/videos", server.videos)
+	mux.HandleFunc("GET /v1/videos/{videoID}", server.video)
+	mux.HandleFunc("GET /v1/videos/{videoID}/{subresource}", server.videoSubresource)
+	mux.HandleFunc("POST /v1/videos/{videoID}/remix", server.videoRemix)
+	mux.HandleFunc("POST /v1/videos/characters", server.videoCharacters)
+	mux.HandleFunc("POST /v1/videos/edits", server.videoEdits)
+	mux.HandleFunc("POST /v1/videos/extensions", server.videoExtensions)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -493,6 +501,27 @@ func (server Server) evalRuns(writer http.ResponseWriter, request *http.Request)
 }
 func (server Server) evalRun(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "evals/"+request.PathValue("evalID")+"/runs/"+request.PathValue("runID"))
+}
+func (server Server) videos(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos")
+}
+func (server Server) video(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos/"+request.PathValue("videoID"))
+}
+func (server Server) videoSubresource(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos/"+request.PathValue("videoID")+"/"+request.PathValue("subresource"))
+}
+func (server Server) videoRemix(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos/"+request.PathValue("videoID")+"/remix")
+}
+func (server Server) videoCharacters(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos/characters")
+}
+func (server Server) videoEdits(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos/edits")
+}
+func (server Server) videoExtensions(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "videos/extensions")
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
