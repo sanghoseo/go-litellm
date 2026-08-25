@@ -231,6 +231,10 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/fine_tuning/jobs/{jobID}/cancel", server.cancelFineTuningJob)
 	mux.HandleFunc("GET /v1/fine_tuning/jobs/{jobID}/events", server.fineTuningJobEvents)
 	mux.HandleFunc("GET /v1/fine_tuning/jobs/{jobID}/checkpoints", server.fineTuningJobCheckpoints)
+	mux.HandleFunc("GET /v1/containers", server.containers)
+	mux.HandleFunc("POST /v1/containers", server.containers)
+	mux.HandleFunc("GET /v1/containers/{containerID}", server.container)
+	mux.HandleFunc("DELETE /v1/containers/{containerID}", server.container)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -364,6 +368,13 @@ func (server Server) fineTuningJobEvents(writer http.ResponseWriter, request *ht
 }
 func (server Server) fineTuningJobCheckpoints(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "fine_tuning/jobs/"+request.PathValue("jobID")+"/checkpoints")
+}
+
+func (server Server) containers(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "containers")
+}
+func (server Server) container(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "containers/"+request.PathValue("containerID"))
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
