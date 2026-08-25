@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -92,6 +93,16 @@ func TestHealthDoesNotRequireAuthentication(t *testing.T) {
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestReadinessReportsUnavailableDependency(t *testing.T) {
+	server := NewServerWithRuntime(config.Config{}, nil, nil, nil, nil, failingReadinessCheck{})
+	request := httptest.NewRequest(http.MethodGet, "/health/readiness", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
 	}
 }
 
@@ -191,6 +202,10 @@ type denyingLimiter struct{}
 func (denyingLimiter) Allow(context.Context, string, int64, time.Duration) (bool, error) {
 	return false, nil
 }
+
+type failingReadinessCheck struct{}
+
+func (failingReadinessCheck) Ping(context.Context) error { return errors.New("unavailable") }
 
 func (completer deploymentCapturingCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
 	completer.bases <- deployment.APIBase

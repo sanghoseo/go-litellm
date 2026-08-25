@@ -28,15 +28,20 @@ type RequestLimiter interface {
 	Allow(context.Context, string, int64, time.Duration) (bool, error)
 }
 
+type ReadinessCheck interface {
+	Ping(context.Context) error
+}
+
 type Server struct {
-	config         config.Config
-	chatCompleter  providers.ChatCompleter
-	responseMaker  providers.ResponseCreator
-	embedder       providers.Embedder
-	keyValidator   VirtualKeyValidator
-	router         *routing.Router
-	usageRecorder  usage.Recorder
-	requestLimiter RequestLimiter
+	config          config.Config
+	chatCompleter   providers.ChatCompleter
+	responseMaker   providers.ResponseCreator
+	embedder        providers.Embedder
+	keyValidator    VirtualKeyValidator
+	router          *routing.Router
+	usageRecorder   usage.Recorder
+	requestLimiter  RequestLimiter
+	readinessChecks []ReadinessCheck
 }
 
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
@@ -57,8 +62,8 @@ func NewServerWithDependencies(proxyConfig config.Config, completer providers.Ch
 	return NewServerWithRuntime(proxyConfig, completer, validator, recorder, nil)
 }
 
-func NewServerWithRuntime(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder, limiter RequestLimiter) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
+func NewServerWithRuntime(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder, limiter RequestLimiter, readinessChecks ...ReadinessCheck) Server {
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, readinessChecks: readinessChecks, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
 	server.setOptionalCompleters(completer)
 	return server
 }
@@ -75,7 +80,7 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 func (server Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/liveliness", server.health)
-	mux.HandleFunc("GET /health/readiness", server.health)
+	mux.HandleFunc("GET /health/readiness", server.readiness)
 	mux.HandleFunc("GET /v1/models", server.models)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -263,6 +268,19 @@ func copyResponse(writer http.ResponseWriter, body io.Reader) error {
 }
 
 func (server Server) health(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (server Server) readiness(writer http.ResponseWriter, request *http.Request) {
+	for _, check := range server.readinessChecks {
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		err := check.Ping(ctx)
+		cancel()
+		if err != nil {
+			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+			return
+		}
+	}
 	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 }
 
