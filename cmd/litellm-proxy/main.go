@@ -17,6 +17,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/httpapi"
 	"github.com/BerriAI/litellm/go-proxy/internal/localdev"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
+	"github.com/BerriAI/litellm/go-proxy/internal/providers/anthropic"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/azure"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
 	"github.com/BerriAI/litellm/go-proxy/internal/store/postgres"
@@ -71,8 +72,9 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	}
 
 	providerRegistry := providers.NewRegistry(map[string]providers.Client{
-		"azure":  azure.NewClient(nil),
-		"openai": openai.NewClient(nil),
+		"anthropic": anthropic.NewClient(nil),
+		"azure":     azure.NewClient(nil),
+		"openai":    openai.NewClient(nil),
 	})
 	server := &http.Server{
 		Addr:              listenAddress,
