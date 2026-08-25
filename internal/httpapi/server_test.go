@@ -371,6 +371,17 @@ func TestModelReturnsConfiguredModelAndRejectsUnknownModel(t *testing.T) {
 	}
 }
 
+func TestModelsAppliesAllVirtualKeyModelScopes(t *testing.T) {
+	server := NewServerWithVirtualKeyValidator(config.Config{Models: []config.Model{{Name: "shared", Model: "openai/shared"}, {Name: "key-only", Model: "openai/key-only"}}}, nil, scopedModelsValidator{})
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer sk-test")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"shared"`) || strings.Contains(response.Body.String(), `"id":"key-only"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestHealthDoesNotRequireAuthentication(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key"})
 	request := httptest.NewRequest(http.MethodGet, "/health/liveliness", nil)
@@ -1187,6 +1198,16 @@ func (completer deploymentCapturingCompleter) ChatCompletion(_ context.Context, 
 }
 
 type stubVirtualKeyValidator struct{}
+
+type scopedModelsValidator struct{}
+
+func (scopedModelsValidator) Validate(_ context.Context, _ string, model string) (auth.VirtualKey, error) {
+	key := auth.VirtualKey{Models: []string{"shared", "key-only"}, UserModels: []string{"shared", "key-only"}, TeamModels: []string{"shared", "key-only"}, ProjectModels: []string{"shared"}, OrganizationModels: []string{"shared"}}
+	if model != "" && !auth.AllowsModel(key, model) {
+		return auth.VirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	return key, nil
+}
 
 func (stubVirtualKeyValidator) Validate(_ context.Context, rawKey string, model string) (auth.VirtualKey, error) {
 	if rawKey != "sk-virtual-key" || (model != "" && model != "gateway-model") {

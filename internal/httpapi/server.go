@@ -1510,7 +1510,7 @@ func (server Server) models(writer http.ResponseWriter, request *http.Request) {
 
 	models := make([]modelResponse, 0, len(server.config.Models))
 	for _, configuredModel := range server.config.Models {
-		if len(virtualKey.Models) > 0 && !contains(virtualKey.Models, configuredModel.Name) {
+		if !auth.AllowsModel(virtualKey, configuredModel.Name) {
 			continue
 		}
 		models = append(models, modelResponse{
@@ -1531,7 +1531,7 @@ func (server Server) model(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
-	if len(virtualKey.Models) > 0 && !contains(virtualKey.Models, modelID) {
+	if !auth.AllowsModel(virtualKey, modelID) {
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: "The model '" + modelID + "' does not exist", Type: "invalid_request_error", Code: "model_not_found"})
 		return
 	}

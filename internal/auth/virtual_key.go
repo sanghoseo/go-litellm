@@ -216,22 +216,18 @@ func (validator Validator) Validate(ctx context.Context, rawKey string, model st
 	if virtualKey.Blocked || (virtualKey.ExpiresAt != nil && !virtualKey.ExpiresAt.After(time.Now())) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
-	if model != "" && len(virtualKey.Models) > 0 && !contains(virtualKey.Models, model) {
-		return VirtualKey{}, ErrInvalidVirtualKey
-	}
-	if model != "" && len(virtualKey.UserModels) > 0 && !contains(virtualKey.UserModels, model) {
-		return VirtualKey{}, ErrInvalidVirtualKey
-	}
-	if model != "" && len(virtualKey.TeamModels) > 0 && !contains(virtualKey.TeamModels, model) {
-		return VirtualKey{}, ErrInvalidVirtualKey
-	}
-	if model != "" && len(virtualKey.ProjectModels) > 0 && !contains(virtualKey.ProjectModels, model) {
-		return VirtualKey{}, ErrInvalidVirtualKey
-	}
-	if model != "" && len(virtualKey.OrganizationModels) > 0 && !contains(virtualKey.OrganizationModels, model) {
+	if model != "" && !AllowsModel(virtualKey, model) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	return virtualKey, nil
+}
+
+func AllowsModel(key VirtualKey, model string) bool {
+	return (len(key.Models) == 0 || contains(key.Models, model)) &&
+		(len(key.UserModels) == 0 || contains(key.UserModels, model)) &&
+		(len(key.TeamModels) == 0 || contains(key.TeamModels, model)) &&
+		(len(key.ProjectModels) == 0 || contains(key.ProjectModels, model)) &&
+		(len(key.OrganizationModels) == 0 || contains(key.OrganizationModels, model))
 }
 
 func HashKey(rawKey string) string {

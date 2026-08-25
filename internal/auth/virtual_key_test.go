@@ -27,6 +27,22 @@ func TestValidatorRejectsKeyOutsideModelAllowlist(t *testing.T) {
 	}
 }
 
+func TestAllowsModelRequiresEveryScopedAllowlist(t *testing.T) {
+	key := VirtualKey{
+		Models:             []string{"gateway-model", "team-only"},
+		UserModels:         []string{"gateway-model", "team-only"},
+		TeamModels:         []string{"gateway-model", "team-only"},
+		ProjectModels:      []string{"gateway-model"},
+		OrganizationModels: []string{"gateway-model"},
+	}
+	if !AllowsModel(key, "gateway-model") {
+		t.Fatal("shared model was rejected")
+	}
+	if AllowsModel(key, "team-only") {
+		t.Fatal("model omitted by a narrower scope was accepted")
+	}
+}
+
 type stubStore struct {
 	key VirtualKey
 }
