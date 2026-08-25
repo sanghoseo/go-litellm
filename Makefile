@@ -9,7 +9,7 @@
 	lint-ruff-budget lint-ruff-budget-update lint-budget-update lint-gate \
 	install-dev install-proxy-dev install-test-deps install-hooks \
 	install-helm-unittest check-circular-imports check-import-safety check check-inner pre-commit \
-	lint-install lint-fetch-base bootstrap
+	lint-install lint-fetch-base bootstrap go-build go-test go-test-race go-run go-local-dev
 
 # Default target
 help:
@@ -52,6 +52,11 @@ help:
 	@echo "  make test-proxy-unit-b  - Run proxy_unit_tests (p-z, ~28 files)"
 	@echo "  make test-integration   - Run integration tests"
 	@echo "  make test-unit-helm     - Run helm unit tests"
+	@echo "  make go-build           - Build the standalone Go proxy binary"
+	@echo "  make go-test            - Run all Go proxy and SDK tests"
+	@echo "  make go-test-race       - Run all Go tests with the race detector"
+	@echo "  make go-run             - Run the Go proxy using config.yaml"
+	@echo "  make go-local-dev       - Run the Go proxy with embedded PostgreSQL and Redis"
 	@echo ""
 	@echo "Heavy targets (check, lint) queue for LITELLM_GATE_SLOTS machine-wide"
 	@echo "slots (default 2; 0 disables) so parallel sessions don't thrash one machine."
@@ -72,6 +77,27 @@ LINT_OUTPUT_SYNC := $(if $(filter output-sync,$(.FEATURES)),--output-sync=target
 # Show info
 info:
 	@echo "UV: $(UV)"
+
+# Go standalone proxy workflow. These targets deliberately do not depend on
+# uv/Prisma: the production Go binary initializes its own PostgreSQL schema.
+GO_PROXY_PACKAGE := ./cmd/litellm-proxy
+GO_PROXY_BINARY ?= ./bin/litellm-proxy
+
+go-build:
+	@mkdir -p $$(dirname "$(GO_PROXY_BINARY)")
+	go build -o "$(GO_PROXY_BINARY)" $(GO_PROXY_PACKAGE)
+
+go-test:
+	go test ./cmd/litellm-proxy ./internal/... ./pkg/... ./litellm
+
+go-test-race:
+	go test -race ./...
+
+go-run:
+	go run $(GO_PROXY_PACKAGE) --config config.yaml
+
+go-local-dev:
+	go run $(GO_PROXY_PACKAGE) --config config.yaml --local-dev
 
 # Installation targets
 # --inexact: sync the locked deps without pruning anything already installed, so running
