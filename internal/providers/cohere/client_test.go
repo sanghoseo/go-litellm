@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
@@ -58,9 +59,26 @@ func TestChatCompletionConvertsCohereResponse(t *testing.T) {
 	}
 }
 
-func TestChatRequestRejectsStreaming(t *testing.T) {
-	if _, err := chatRequest([]byte(`{"stream":true}`), "cohere/command-r"); err == nil {
-		t.Fatal("chatRequest() error = nil, want streaming error")
+func TestChatCompletionConvertsCohereStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "event: message-start\ndata: {\"id\":\"chat_1\",\"model\":\"command-r\"}\n\n")
+		_, _ = io.WriteString(writer, "event: content-delta\ndata: {\"delta\":{\"message\":{\"content\":{\"text\":\"hello\"}}}}\n\n")
+		_, _ = io.WriteString(writer, "event: message-end\ndata: {\"delta\":{\"finish_reason\":\"COMPLETE\"}}\n\n")
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).ChatCompletion(context.Background(), config.Model{Model: "cohere/command-r", APIBase: upstream.URL + "/v2"}, []byte(`{"model":"gateway","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	defer response.Body.Close()
+	stream, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if !strings.Contains(string(stream), `"role":"assistant"`) || !strings.Contains(string(stream), `"content":"hello"`) || !strings.Contains(string(stream), `"finish_reason":"stop"`) || !strings.HasSuffix(string(stream), "data: [DONE]\n\n") {
+		t.Fatalf("converted stream = %s", stream)
 	}
 }
 

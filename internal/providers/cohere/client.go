@@ -1,6 +1,7 @@
 package cohere
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -53,6 +54,9 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return providers.Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil
+	}
+	if isStreaming(requestBody) {
+		return providers.Response{StatusCode: response.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: openAIStream(response.Body)}, nil
 	}
 	defer response.Body.Close()
 	converted, err := chatResponse(response.Body)
@@ -132,14 +136,128 @@ func chatRequest(body []byte, configuredModel string) ([]byte, error) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, fmt.Errorf("decode chat completion request: %w", err)
 	}
-	if rawStream, found := payload["stream"]; found && string(rawStream) == "true" {
-		return nil, fmt.Errorf("Cohere streaming chat is not supported")
-	}
 	if err := setModel(payload, configuredModel); err != nil {
 		return nil, err
 	}
 	delete(payload, "stream_options")
 	return json.Marshal(payload)
+}
+
+func isStreaming(body []byte) bool {
+	var payload struct {
+		Stream bool `json:"stream"`
+	}
+	return json.Unmarshal(body, &payload) == nil && payload.Stream
+}
+
+func openAIStream(source io.ReadCloser) io.ReadCloser {
+	reader, writer := io.Pipe()
+	go func() {
+		defer source.Close()
+		defer writer.Close()
+		scanner := bufio.NewScanner(source)
+		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		var eventType string
+		var id, model string
+		created := time.Now().Unix()
+		started := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "event: ") {
+				eventType = strings.TrimPrefix(line, "event: ")
+				continue
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var event struct {
+				Type  string `json:"type"`
+				ID    string `json:"id"`
+				Model string `json:"model"`
+				Delta struct {
+					Message struct {
+						Content any `json:"content"`
+					} `json:"message"`
+					FinishReason string `json:"finish_reason"`
+				} `json:"delta"`
+				Data struct {
+					ID    string `json:"id"`
+					Model string `json:"model"`
+					Delta struct {
+						Message struct {
+							Content any `json:"content"`
+						} `json:"message"`
+						FinishReason string `json:"finish_reason"`
+					} `json:"delta"`
+				} `json:"data"`
+			}
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) != nil {
+				continue
+			}
+			if event.Type == "" {
+				event.Type = eventType
+			}
+			if event.ID != "" {
+				id = event.ID
+			}
+			if event.Data.ID != "" {
+				id = event.Data.ID
+			}
+			if event.Model != "" {
+				model = event.Model
+			}
+			if event.Data.Model != "" {
+				model = event.Data.Model
+			}
+			if event.Type == "message-start" && !started {
+				writeChunk(writer, id, model, created, proxytpes.Delta{Role: "assistant"}, nil)
+				started = true
+			}
+			if event.Type == "content-delta" {
+				content := event.Delta.Message.Content
+				if content == nil {
+					content = event.Data.Delta.Message.Content
+				}
+				if text := contentText(content); text != "" {
+					if !started {
+						writeChunk(writer, id, model, created, proxytpes.Delta{Role: "assistant"}, nil)
+						started = true
+					}
+					writeChunk(writer, id, model, created, proxytpes.Delta{Content: text}, nil)
+				}
+			}
+			if event.Type == "message-end" {
+				finishReason := event.Delta.FinishReason
+				if finishReason == "" {
+					finishReason = event.Data.Delta.FinishReason
+				}
+				if finishReason == "" || strings.EqualFold(finishReason, "complete") {
+					finishReason = "stop"
+				}
+				writeChunk(writer, id, model, created, proxytpes.Delta{}, &finishReason)
+				_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+			}
+		}
+	}()
+	return reader
+}
+
+func contentText(content any) string {
+	switch value := content.(type) {
+	case string:
+		return value
+	case map[string]any:
+		text, _ := value["text"].(string)
+		return text
+	}
+	return ""
+}
+
+func writeChunk(writer *io.PipeWriter, id string, model string, created int64, delta proxytpes.Delta, finishReason *string) {
+	chunk, err := json.Marshal(proxytpes.ChatCompletionChunk{ID: id, Object: "chat.completion.chunk", Created: created, Model: model, Choices: []proxytpes.StreamingChoice{{Index: 0, Delta: delta, FinishReason: finishReason}}})
+	if err == nil {
+		_, _ = writer.Write(append([]byte("data: "), append(chunk, []byte("\n\n")...)...))
+	}
 }
 
 func embeddingRequest(body []byte, configuredModel string) ([]byte, error) {
