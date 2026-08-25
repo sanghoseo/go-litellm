@@ -21,6 +21,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/azure"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
 	"github.com/BerriAI/litellm/go-proxy/internal/store/postgres"
+	redisstore "github.com/BerriAI/litellm/go-proxy/internal/store/redis"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -69,6 +70,16 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 			return fmt.Errorf("initialize PostgreSQL schema: %w", err)
 		}
 		keyValidator = auth.NewValidator(postgres.NewVirtualKeyStore(database))
+	}
+	if proxyConfig.RedisURL != "" {
+		redisClient, err := redisstore.New(proxyConfig.RedisURL)
+		if err != nil {
+			return fmt.Errorf("connect Redis: %w", err)
+		}
+		defer redisClient.Close()
+		if err := redisClient.Ping(context.Background()); err != nil {
+			return fmt.Errorf("ping Redis: %w", err)
+		}
 	}
 
 	providerRegistry := providers.NewRegistry(map[string]providers.Client{
