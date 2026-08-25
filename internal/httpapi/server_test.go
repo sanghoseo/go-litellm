@@ -254,6 +254,46 @@ func TestOrganizationManagementLifecycle(t *testing.T) {
 	}
 }
 
+func TestBudgetManagementLifecycle(t *testing.T) {
+	manager := &memoryBudgetManager{budgets: map[string]auth.ManagedBudget{}}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithBudgetManager(manager)
+	create := httptest.NewRequest(http.MethodPost, "/budget/new", strings.NewReader(`{"budget_id":"budget-test","max_budget":12.5,"rpm_limit":4,"budget_duration":"1d"}`))
+	create.Header.Set("Authorization", "Bearer master-key")
+	created := httptest.NewRecorder()
+	server.Handler().ServeHTTP(created, create)
+	if created.Code != http.StatusOK || manager.budgets["budget-test"].MaxBudget == nil || *manager.budgets["budget-test"].MaxBudget != 12.5 {
+		t.Fatalf("create status=%d budgets=%#v", created.Code, manager.budgets)
+	}
+	info := httptest.NewRequest(http.MethodPost, "/budget/info", strings.NewReader(`{"budgets":["budget-test"]}`))
+	info.Header.Set("Authorization", "Bearer master-key")
+	infoResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(infoResponse, info)
+	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"budget_id":"budget-test"`) {
+		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
+	}
+	update := httptest.NewRequest(http.MethodPost, "/budget/update", strings.NewReader(`{"budget_id":"budget-test","soft_budget":10}`))
+	update.Header.Set("Authorization", "Bearer master-key")
+	updated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || manager.budgets["budget-test"].SoftBudget == nil || *manager.budgets["budget-test"].SoftBudget != 10 {
+		t.Fatalf("update status=%d budget=%#v", updated.Code, manager.budgets["budget-test"])
+	}
+	list := httptest.NewRequest(http.MethodGet, "/budget/list", nil)
+	list.Header.Set("Authorization", "Bearer master-key")
+	listed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"budget_id":"budget-test"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/budget/delete", strings.NewReader(`{"id":"budget-test"}`))
+	deleteRequest.Header.Set("Authorization", "Bearer master-key")
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK || len(manager.budgets) != 0 {
+		t.Fatalf("delete status=%d budgets=%#v", deleted.Code, manager.budgets)
+	}
+}
+
 func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(
 		config.Config{Models: []config.Model{
@@ -630,6 +670,63 @@ type memoryProjectManager struct {
 
 type memoryOrganizationManager struct {
 	organizations map[string]auth.ManagedOrganization
+}
+
+type memoryBudgetManager struct{ budgets map[string]auth.ManagedBudget }
+
+func (manager *memoryBudgetManager) CreateBudget(_ context.Context, budget auth.ManagedBudget) error {
+	manager.budgets[budget.BudgetID] = budget
+	return nil
+}
+func (manager *memoryBudgetManager) GetBudget(_ context.Context, budgetID string) (auth.ManagedBudget, error) {
+	budget, found := manager.budgets[budgetID]
+	if !found {
+		return auth.ManagedBudget{}, auth.ErrInvalidVirtualKey
+	}
+	return budget, nil
+}
+func (manager *memoryBudgetManager) ListBudgets(_ context.Context, _ int) ([]auth.ManagedBudget, error) {
+	budgets := make([]auth.ManagedBudget, 0, len(manager.budgets))
+	for _, budget := range manager.budgets {
+		budgets = append(budgets, budget)
+	}
+	return budgets, nil
+}
+func (manager *memoryBudgetManager) UpdateBudget(_ context.Context, budgetID string, update auth.ManagedBudgetUpdate) (bool, error) {
+	budget, found := manager.budgets[budgetID]
+	if !found {
+		return false, nil
+	}
+	if update.MaxBudget != nil {
+		budget.MaxBudget = update.MaxBudget
+	}
+	if update.SoftBudget != nil {
+		budget.SoftBudget = update.SoftBudget
+	}
+	if update.MaxParallelRequests != nil {
+		budget.MaxParallelRequests = update.MaxParallelRequests
+	}
+	if update.TPMLimit != nil {
+		budget.TPMLimit = update.TPMLimit
+	}
+	if update.RPMLimit != nil {
+		budget.RPMLimit = update.RPMLimit
+	}
+	if update.BudgetDuration != nil {
+		budget.BudgetDuration = *update.BudgetDuration
+	}
+	if update.BudgetResetAt != nil {
+		budget.BudgetResetAt = update.BudgetResetAt
+	}
+	manager.budgets[budgetID] = budget
+	return true, nil
+}
+func (manager *memoryBudgetManager) DeleteBudget(_ context.Context, budgetID string) (bool, error) {
+	if _, found := manager.budgets[budgetID]; !found {
+		return false, nil
+	}
+	delete(manager.budgets, budgetID)
+	return true, nil
 }
 
 func (manager *memoryOrganizationManager) CreateOrganization(_ context.Context, organization auth.ManagedOrganization) error {

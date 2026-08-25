@@ -128,6 +128,35 @@ type ManagedOrganization struct {
 	Blocked           bool
 }
 
+type ManagedBudget struct {
+	BudgetID            string     `json:"budget_id"`
+	MaxBudget           *float64   `json:"max_budget,omitempty"`
+	SoftBudget          *float64   `json:"soft_budget,omitempty"`
+	MaxParallelRequests *int       `json:"max_parallel_requests,omitempty"`
+	TPMLimit            *int64     `json:"tpm_limit,omitempty"`
+	RPMLimit            *int64     `json:"rpm_limit,omitempty"`
+	BudgetDuration      string     `json:"budget_duration,omitempty"`
+	BudgetResetAt       *time.Time `json:"budget_reset_at,omitempty"`
+}
+
+type ManagedBudgetUpdate struct {
+	MaxBudget           *float64
+	SoftBudget          *float64
+	MaxParallelRequests *int
+	TPMLimit            *int64
+	RPMLimit            *int64
+	BudgetDuration      *string
+	BudgetResetAt       *time.Time
+}
+
+type BudgetManager interface {
+	CreateBudget(context.Context, ManagedBudget) error
+	GetBudget(context.Context, string) (ManagedBudget, error)
+	ListBudgets(context.Context, int) ([]ManagedBudget, error)
+	UpdateBudget(context.Context, string, ManagedBudgetUpdate) (bool, error)
+	DeleteBudget(context.Context, string) (bool, error)
+}
+
 type ManagedOrganizationUpdate struct {
 	OrganizationAlias *string
 	BudgetID          *string

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -62,6 +63,7 @@ type Server struct {
 	userManager         auth.UserManager
 	projectManager      auth.ProjectManager
 	organizationManager auth.OrganizationManager
+	budgetManager       auth.BudgetManager
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -91,6 +93,11 @@ func (server Server) WithProjectManager(manager auth.ProjectManager) Server {
 
 func (server Server) WithOrganizationManager(manager auth.OrganizationManager) Server {
 	server.organizationManager = manager
+	return server
+}
+
+func (server Server) WithBudgetManager(manager auth.BudgetManager) Server {
+	server.budgetManager = manager
 	return server
 }
 
@@ -164,6 +171,11 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /organization/list", server.listOrganizations)
 	mux.HandleFunc("POST /organization/update", server.updateOrganization)
 	mux.HandleFunc("POST /organization/delete", server.deleteOrganization)
+	mux.HandleFunc("POST /budget/new", server.createBudget)
+	mux.HandleFunc("POST /budget/info", server.budgetInfo)
+	mux.HandleFunc("GET /budget/list", server.listBudgets)
+	mux.HandleFunc("POST /budget/update", server.updateBudget)
+	mux.HandleFunc("POST /budget/delete", server.deleteBudget)
 	mux.HandleFunc("POST /team/new", server.createTeam)
 	mux.HandleFunc("GET /team/info", server.teamInfo)
 	mux.HandleFunc("GET /team/list", server.listTeams)
@@ -1521,6 +1533,142 @@ func (server Server) authorize(request *http.Request, model string) (auth.Virtua
 		}
 	}
 	return auth.VirtualKey{}, server.config.MasterKey == "" && server.keyValidator == nil
+}
+
+type budgetRequest struct {
+	BudgetID            string     `json:"budget_id"`
+	MaxBudget           *float64   `json:"max_budget"`
+	SoftBudget          *float64   `json:"soft_budget"`
+	MaxParallelRequests *int       `json:"max_parallel_requests"`
+	TPMLimit            *int64     `json:"tpm_limit"`
+	RPMLimit            *int64     `json:"rpm_limit"`
+	BudgetDuration      string     `json:"budget_duration"`
+	BudgetResetAt       *time.Time `json:"budget_reset_at"`
+}
+
+type budgetUpdateRequest struct {
+	BudgetID            string     `json:"budget_id"`
+	MaxBudget           *float64   `json:"max_budget"`
+	SoftBudget          *float64   `json:"soft_budget"`
+	MaxParallelRequests *int       `json:"max_parallel_requests"`
+	TPMLimit            *int64     `json:"tpm_limit"`
+	RPMLimit            *int64     `json:"rpm_limit"`
+	BudgetDuration      *string    `json:"budget_duration"`
+	BudgetResetAt       *time.Time `json:"budget_reset_at"`
+}
+
+type budgetInfoRequest struct {
+	Budgets []string `json:"budgets"`
+}
+
+func validBudgetValue(value *float64) bool {
+	return value == nil || (!math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= 0)
+}
+
+func (server Server) createBudget(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.budgetManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in budgetRequest
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || !validBudgetValue(in.MaxBudget) || !validBudgetValue(in.SoftBudget) {
+		writeJSON(w, 400, openAIError{Message: "Request body contains an invalid budget", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if in.BudgetID == "" {
+		id, e := litellm.UUID4()
+		if e != nil {
+			writeJSON(w, 500, openAIError{Message: "Could not generate budget ID", Type: "server_error", Code: "budget_creation_failed"})
+			return
+		}
+		in.BudgetID = "budget-" + id
+	}
+	budget := auth.ManagedBudget{BudgetID: in.BudgetID, MaxBudget: in.MaxBudget, SoftBudget: in.SoftBudget, MaxParallelRequests: in.MaxParallelRequests, TPMLimit: in.TPMLimit, RPMLimit: in.RPMLimit, BudgetDuration: in.BudgetDuration, BudgetResetAt: in.BudgetResetAt}
+	if e := server.budgetManager.CreateBudget(r.Context(), budget); e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not create budget", Type: "server_error", Code: "budget_creation_failed"})
+		return
+	}
+	writeJSON(w, 200, budget)
+}
+
+func (server Server) budgetInfo(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.budgetManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in budgetInfoRequest
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || len(in.Budgets) == 0 {
+		writeJSON(w, 400, openAIError{Message: "Specify budget IDs to query", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	budgets := make([]auth.ManagedBudget, 0, len(in.Budgets))
+	for _, id := range in.Budgets {
+		budget, e := server.budgetManager.GetBudget(r.Context(), id)
+		if e == nil {
+			budgets = append(budgets, budget)
+		}
+	}
+	writeJSON(w, 200, budgets)
+}
+
+func (server Server) listBudgets(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.budgetManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	budgets, e := server.budgetManager.ListBudgets(r.Context(), 100)
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not list budgets", Type: "server_error", Code: "budget_list_failed"})
+		return
+	}
+	writeJSON(w, 200, budgets)
+}
+
+func (server Server) updateBudget(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.budgetManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in budgetUpdateRequest
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || in.BudgetID == "" || !validBudgetValue(in.MaxBudget) || !validBudgetValue(in.SoftBudget) {
+		writeJSON(w, 400, openAIError{Message: "Request body contains an invalid budget", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	ok, e := server.budgetManager.UpdateBudget(r.Context(), in.BudgetID, auth.ManagedBudgetUpdate{MaxBudget: in.MaxBudget, SoftBudget: in.SoftBudget, MaxParallelRequests: in.MaxParallelRequests, TPMLimit: in.TPMLimit, RPMLimit: in.RPMLimit, BudgetDuration: in.BudgetDuration, BudgetResetAt: in.BudgetResetAt})
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not update budget", Type: "server_error", Code: "budget_update_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, 404, openAIError{Message: "Budget not found", Type: "invalid_request_error", Code: "budget_not_found"})
+		return
+	}
+	budget, e := server.budgetManager.GetBudget(r.Context(), in.BudgetID)
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not load budget", Type: "server_error", Code: "budget_load_failed"})
+		return
+	}
+	writeJSON(w, 200, budget)
+}
+
+func (server Server) deleteBudget(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.budgetManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in struct {
+		ID string `json:"id"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || in.ID == "" {
+		writeJSON(w, 400, openAIError{Message: "Missing required parameter: 'id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deleted, e := server.budgetManager.DeleteBudget(r.Context(), in.ID)
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not delete budget", Type: "server_error", Code: "budget_deletion_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"deleted": deleted})
 }
 
 func (server Server) authorizeAdmin(request *http.Request) bool {
