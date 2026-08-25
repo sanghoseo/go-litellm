@@ -32,6 +32,7 @@ type Model struct {
 	Timeout       time.Duration
 	StreamTimeout time.Duration
 	NumRetries    int
+	AWSRegion     string
 }
 
 type document struct {
@@ -54,6 +55,7 @@ type modelParams struct {
 	Timeout       float64 `yaml:"timeout"`
 	StreamTimeout float64 `yaml:"stream_timeout"`
 	NumRetries    int     `yaml:"num_retries"`
+	AWSRegion     string  `yaml:"aws_region_name"`
 }
 
 type generalSettings struct {
@@ -145,7 +147,7 @@ func parseModel(entry modelEntry) (Model, error) {
 		return Model{}, fmt.Errorf("resolve litellm_params.api_base: %w", err)
 	}
 
-	return Model{Name: name, Model: modelName, APIKey: apiKey, APIBase: apiBase, Timeout: secondsDuration(entry.LiteLLMParams.Timeout), StreamTimeout: secondsDuration(entry.LiteLLMParams.StreamTimeout), NumRetries: entry.LiteLLMParams.NumRetries}, nil
+	return Model{Name: name, Model: modelName, APIKey: apiKey, APIBase: apiBase, Timeout: secondsDuration(entry.LiteLLMParams.Timeout), StreamTimeout: secondsDuration(entry.LiteLLMParams.StreamTimeout), NumRetries: entry.LiteLLMParams.NumRetries, AWSRegion: entry.LiteLLMParams.AWSRegion}, nil
 }
 
 func secondsDuration(value float64) time.Duration {

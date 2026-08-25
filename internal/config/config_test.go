@@ -45,6 +45,7 @@ model_list:
       timeout: 2.5
       stream_timeout: 3
       num_retries: 4
+      aws_region_name: us-east-1
 litellm_settings:
   request_timeout: 10
   num_retries: 2
@@ -59,7 +60,7 @@ router_settings:
 	if loaded.RequestTimeout != 10*time.Second || loaded.NumRetries != 2 || loaded.ModelAliases["public-name"] != "deployment" {
 		t.Fatalf("config = %#v", loaded)
 	}
-	if loaded.Models[0].Timeout != 2500*time.Millisecond || loaded.Models[0].StreamTimeout != 3*time.Second || loaded.Models[0].NumRetries != 4 {
+	if loaded.Models[0].Timeout != 2500*time.Millisecond || loaded.Models[0].StreamTimeout != 3*time.Second || loaded.Models[0].NumRetries != 4 || loaded.Models[0].AWSRegion != "us-east-1" {
 		t.Fatalf("model = %#v", loaded.Models[0])
 	}
 }
