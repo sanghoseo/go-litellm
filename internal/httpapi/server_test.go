@@ -677,6 +677,8 @@ func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 		{http.MethodPost, "/v1/fine_tuning/jobs", "fine_tuning/jobs"},
 		{http.MethodGet, "/v1/fine_tuning/jobs/job-123", "fine_tuning/jobs/job-123"},
 		{http.MethodPost, "/v1/fine_tuning/jobs/job-123/cancel", "fine_tuning/jobs/job-123/cancel"},
+		{http.MethodGet, "/v1/fine_tuning/jobs/job-123/events", "fine_tuning/jobs/job-123/events"},
+		{http.MethodGet, "/v1/fine_tuning/jobs/job-123/checkpoints", "fine_tuning/jobs/job-123/checkpoints"},
 		{http.MethodPost, "/v1/audio/transcriptions", "audio/transcriptions"},
 		{http.MethodPost, "/v1/audio/translations", "audio/translations"},
 		{http.MethodPost, "/v1/images/edits", "images/edits"},
