@@ -159,6 +159,11 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /key/update", server.updateKey)
 	mux.HandleFunc("GET /key/list", server.listKeys)
 	mux.HandleFunc("POST /key/regenerate", server.regenerateKey)
+	mux.HandleFunc("POST /organization/new", server.createOrganization)
+	mux.HandleFunc("GET /organization/info", server.organizationInfo)
+	mux.HandleFunc("GET /organization/list", server.listOrganizations)
+	mux.HandleFunc("POST /organization/update", server.updateOrganization)
+	mux.HandleFunc("POST /organization/delete", server.deleteOrganization)
 	mux.HandleFunc("POST /team/new", server.createTeam)
 	mux.HandleFunc("GET /team/info", server.teamInfo)
 	mux.HandleFunc("GET /team/list", server.listTeams)
@@ -1094,6 +1099,131 @@ func (server Server) deleteProject(writer http.ResponseWriter, request *http.Req
 
 func projectResponseFrom(project auth.ManagedProject) projectResponse {
 	return projectResponse{ProjectID: project.ProjectID, ProjectAlias: project.ProjectAlias, Description: project.Description, TeamID: project.TeamID, BudgetID: project.BudgetID, Models: nonNilStrings(project.Models), Blocked: project.Blocked}
+}
+
+type organizationRequest struct {
+	OrganizationID    string   `json:"organization_id"`
+	OrganizationAlias string   `json:"organization_alias"`
+	BudgetID          string   `json:"budget_id"`
+	Models            []string `json:"models"`
+	Blocked           bool     `json:"blocked"`
+}
+type organizationUpdateRequest struct {
+	OrganizationID    string    `json:"organization_id"`
+	OrganizationAlias *string   `json:"organization_alias"`
+	BudgetID          *string   `json:"budget_id"`
+	Models            *[]string `json:"models"`
+	Blocked           *bool     `json:"blocked"`
+}
+type organizationResponse struct {
+	OrganizationID    string   `json:"organization_id"`
+	OrganizationAlias string   `json:"organization_alias,omitempty"`
+	BudgetID          string   `json:"budget_id,omitempty"`
+	Models            []string `json:"models"`
+	Blocked           bool     `json:"blocked"`
+}
+
+func (server Server) createOrganization(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.organizationManager == nil {
+		writeJSON(w, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in organizationRequest
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil {
+		writeJSON(w, 400, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if in.OrganizationID == "" {
+		id, e := litellm.UUID4()
+		if e != nil {
+			writeJSON(w, 500, openAIError{Message: "Could not generate organization id", Type: "server_error", Code: "organization_creation_failed"})
+			return
+		}
+		in.OrganizationID = "org-" + id
+	}
+	o := auth.ManagedOrganization{OrganizationID: in.OrganizationID, OrganizationAlias: in.OrganizationAlias, BudgetID: in.BudgetID, Models: in.Models, Blocked: in.Blocked}
+	if e := server.organizationManager.CreateOrganization(r.Context(), o); e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not create organization", Type: "server_error", Code: "organization_creation_failed"})
+		return
+	}
+	writeJSON(w, 200, organizationResponseFrom(o))
+}
+func (server Server) organizationInfo(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.organizationManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	id := r.URL.Query().Get("organization_id")
+	if id == "" {
+		writeJSON(w, 400, openAIError{Message: "Missing required parameter: 'organization_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	o, e := server.organizationManager.GetOrganization(r.Context(), id)
+	if e != nil {
+		writeJSON(w, 404, openAIError{Message: "Organization not found", Type: "invalid_request_error", Code: "organization_not_found"})
+		return
+	}
+	writeJSON(w, 200, organizationResponseFrom(o))
+}
+func (server Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.organizationManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	os, e := server.organizationManager.ListOrganizations(r.Context(), 100)
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not list organizations", Type: "server_error", Code: "organization_list_failed"})
+		return
+	}
+	out := make([]organizationResponse, 0, len(os))
+	for _, o := range os {
+		out = append(out, organizationResponseFrom(o))
+	}
+	writeJSON(w, 200, map[string]any{"data": out})
+}
+func organizationResponseFrom(o auth.ManagedOrganization) organizationResponse {
+	return organizationResponse{OrganizationID: o.OrganizationID, OrganizationAlias: o.OrganizationAlias, BudgetID: o.BudgetID, Models: nonNilStrings(o.Models), Blocked: o.Blocked}
+}
+func (server Server) updateOrganization(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.organizationManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in organizationUpdateRequest
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || in.OrganizationID == "" {
+		writeJSON(w, 400, openAIError{Message: "Missing required parameter: 'organization_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	ok, e := server.organizationManager.UpdateOrganization(r.Context(), in.OrganizationID, auth.ManagedOrganizationUpdate{OrganizationAlias: in.OrganizationAlias, BudgetID: in.BudgetID, Models: in.Models, Blocked: in.Blocked})
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not update organization", Type: "server_error", Code: "organization_update_failed"})
+		return
+	}
+	if !ok {
+		writeJSON(w, 404, openAIError{Message: "Organization not found", Type: "invalid_request_error", Code: "organization_not_found"})
+		return
+	}
+	o, _ := server.organizationManager.GetOrganization(r.Context(), in.OrganizationID)
+	writeJSON(w, 200, organizationResponseFrom(o))
+}
+func (server Server) deleteOrganization(w http.ResponseWriter, r *http.Request) {
+	if !server.authorizeAdmin(r) || server.organizationManager == nil {
+		writeJSON(w, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var in struct {
+		OrganizationID string `json:"organization_id"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || in.OrganizationID == "" {
+		writeJSON(w, 400, openAIError{Message: "Missing required parameter: 'organization_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	ok, e := server.organizationManager.DeleteOrganization(r.Context(), in.OrganizationID)
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not delete organization", Type: "server_error", Code: "organization_deletion_failed"})
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"deleted": ok})
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
