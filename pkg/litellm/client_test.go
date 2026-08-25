@@ -120,6 +120,8 @@ func TestClientFileReadAndDeleteOperations(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"id":"file-1","filename":"test.jsonl"}`))
 		case "DELETE /v1/files/file-1":
 			_, _ = writer.Write([]byte(`{"id":"file-1","object":"file","deleted":true}`))
+		case "GET /v1/files/file-1/content":
+			_, _ = writer.Write([]byte("file-content"))
 		default:
 			t.Fatalf("request=%s %s", request.Method, request.URL.Path)
 		}
@@ -137,6 +139,10 @@ func TestClientFileReadAndDeleteOperations(t *testing.T) {
 	deleted, err := client.DeleteFile(context.Background(), "file-1")
 	if err != nil || !deleted.Deleted {
 		t.Fatalf("deleted=%#v err=%v", deleted, err)
+	}
+	content, err := client.DownloadFileContent(context.Background(), "file-1")
+	if err != nil || string(content) != "file-content" {
+		t.Fatalf("content=%q err=%v", content, err)
 	}
 }
 

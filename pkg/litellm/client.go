@@ -107,6 +107,10 @@ func (client Client) DeleteFile(ctx context.Context, fileID string) (proxytpes.F
 	return response, nil
 }
 
+func (client Client) DownloadFileContent(ctx context.Context, fileID string) ([]byte, error) {
+	return client.requestBytes(ctx, http.MethodGet, "files/"+url.PathEscape(fileID)+"/content", nil)
+}
+
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)
@@ -317,19 +321,29 @@ func (client Client) requestJSON(ctx context.Context, method string, endpoint st
 }
 
 func (client Client) postBytes(ctx context.Context, endpoint string, payload any) ([]byte, error) {
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("encode request: %w", err)
+	return client.requestBytes(ctx, http.MethodPost, endpoint, payload)
+}
+
+func (client Client) requestBytes(ctx context.Context, method string, endpoint string, payload any) ([]byte, error) {
+	var requestBody io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("encode request: %w", err)
+		}
+		requestBody = bytes.NewReader(encoded)
 	}
 	endpointURL, err := client.endpointURL(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+	request, err := http.NewRequestWithContext(ctx, method, endpointURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	request.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	if client.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+client.APIKey)
 	}
