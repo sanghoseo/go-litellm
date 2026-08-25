@@ -113,6 +113,8 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	mux.HandleFunc("POST /v1/images/generations", server.images)
 	mux.HandleFunc("POST /v1/audio/speech", server.speech)
+	mux.HandleFunc("POST /v1/audio/transcriptions", server.transcription)
+	mux.HandleFunc("POST /v1/audio/translations", server.translation)
 	mux.HandleFunc("GET /v1/files", server.files)
 	mux.HandleFunc("POST /v1/files", server.files)
 	mux.HandleFunc("GET /v1/files/{fileID}", server.file)
@@ -171,6 +173,14 @@ func (server Server) speech(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	server.forwardModelRequest(writer, request, server.speechCreator.CreateSpeech)
+}
+
+func (server Server) transcription(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "audio/transcriptions")
+}
+
+func (server Server) translation(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "audio/translations")
 }
 
 func (server Server) files(writer http.ResponseWriter, request *http.Request) {
