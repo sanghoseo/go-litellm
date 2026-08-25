@@ -73,3 +73,28 @@ func TestChatCompletionConvertsGeminiRequestAndResponse(t *testing.T) {
 		t.Fatalf("converted = %s", converted)
 	}
 }
+
+func TestChatCompletionConvertsGeminiStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1beta/models/gemini-test:streamGenerateContent" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n")
+		_, _ = io.WriteString(writer, "data: {\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n")
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).ChatCompletion(context.Background(), config.Model{Model: "gemini/gemini-test", APIBase: upstream.URL + "/v1beta"}, []byte(`{"model":"gateway","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	stream, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stream), `"role":"assistant"`) || !strings.Contains(string(stream), `"content":"hello"`) || !strings.Contains(string(stream), `"finish_reason":"stop"`) || !strings.HasSuffix(string(stream), "data: [DONE]\n\n") {
+		t.Fatalf("stream = %s", stream)
+	}
+}

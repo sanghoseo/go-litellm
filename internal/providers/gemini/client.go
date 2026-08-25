@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -31,7 +32,8 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	if err != nil {
 		return providers.Response{}, err
 	}
-	targetURL, err := generateContentURL(deployment.APIBase, deployment.Model, deployment.APIKey)
+	stream := isStreaming(body)
+	targetURL, err := generateContentURL(deployment.APIBase, deployment.Model, deployment.APIKey, stream)
 	if err != nil {
 		return providers.Response{}, err
 	}
@@ -49,6 +51,9 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return providers.Response{StatusCode: response.StatusCode, Header: response.Header, Body: response.Body}, nil
+	}
+	if stream {
+		return providers.Response{StatusCode: response.StatusCode, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: openAIStream(response.Body, deployment.Model)}, nil
 	}
 	defer response.Body.Close()
 	converted, err := chatCompletionResponse(response.Body, deployment.Model)
@@ -116,8 +121,75 @@ func (client Client) CreateEmbedding(ctx context.Context, deployment config.Mode
 	return providers.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(converted))}, nil
 }
 
-func generateContentURL(apiBase, configuredModel, apiKey string) (string, error) {
-	return modelURL(apiBase, configuredModel, apiKey, "generateContent")
+func generateContentURL(apiBase, configuredModel, apiKey string, stream bool) (string, error) {
+	method := "generateContent"
+	if stream {
+		method = "streamGenerateContent"
+	}
+	return modelURL(apiBase, configuredModel, apiKey, method)
+}
+
+func isStreaming(body []byte) bool {
+	var request struct {
+		Stream bool `json:"stream"`
+	}
+	return json.Unmarshal(body, &request) == nil && request.Stream
+}
+
+func openAIStream(source io.ReadCloser, configuredModel string) io.ReadCloser {
+	reader, writer := io.Pipe()
+	go func() {
+		defer source.Close()
+		defer writer.Close()
+		scanner := bufio.NewScanner(source)
+		scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		started := false
+		created := time.Now().Unix()
+		model := strings.TrimPrefix(configuredModel, "gemini/")
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var response struct {
+				Candidates []struct {
+					Content struct {
+						Parts []struct {
+							Text string `json:"text"`
+						} `json:"parts"`
+					} `json:"content"`
+					FinishReason string `json:"finishReason"`
+				} `json:"candidates"`
+			}
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &response) != nil || len(response.Candidates) == 0 {
+				continue
+			}
+			candidate := response.Candidates[0]
+			if !started {
+				writeStreamChunk(writer, model, created, proxytpes.Delta{Role: "assistant"}, nil)
+				started = true
+			}
+			for _, part := range candidate.Content.Parts {
+				if part.Text != "" {
+					writeStreamChunk(writer, model, created, proxytpes.Delta{Content: part.Text}, nil)
+				}
+			}
+			if candidate.FinishReason != "" {
+				finishReason := strings.ToLower(candidate.FinishReason)
+				writeStreamChunk(writer, model, created, proxytpes.Delta{}, &finishReason)
+				_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+				return
+			}
+		}
+	}()
+	return reader
+}
+
+func writeStreamChunk(writer *io.PipeWriter, model string, created int64, delta proxytpes.Delta, finishReason *string) {
+	chunk, err := json.Marshal(proxytpes.ChatCompletionChunk{ID: "chatcmpl-gemini", Object: "chat.completion.chunk", Created: created, Model: model, Choices: []proxytpes.StreamingChoice{{Index: 0, Delta: delta, FinishReason: finishReason}}})
+	if err == nil {
+		_, _ = writer.Write(append([]byte("data: "), append(chunk, []byte("\n\n")...)...))
+	}
 }
 
 func embeddingURL(apiBase, configuredModel, apiKey string) (string, error) {
