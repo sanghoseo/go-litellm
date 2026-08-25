@@ -22,6 +22,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/bedrock"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/gemini"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
+	"github.com/BerriAI/litellm/go-proxy/internal/providers/openrouter"
 	"github.com/BerriAI/litellm/go-proxy/internal/store/postgres"
 	redisstore "github.com/BerriAI/litellm/go-proxy/internal/store/redis"
 	"github.com/BerriAI/litellm/go-proxy/internal/usage"
@@ -95,11 +96,12 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	}
 
 	providerRegistry := providers.NewRegistry(map[string]providers.Client{
-		"anthropic": anthropic.NewClient(nil),
-		"azure":     azure.NewClient(nil),
-		"bedrock":   bedrock.NewClient(),
-		"gemini":    gemini.NewClient(nil),
-		"openai":    openai.NewClient(nil),
+		"anthropic":  anthropic.NewClient(nil),
+		"azure":      azure.NewClient(nil),
+		"bedrock":    bedrock.NewClient(),
+		"gemini":     gemini.NewClient(nil),
+		"openai":     openai.NewClient(nil),
+		"openrouter": openrouter.NewClient(nil),
 	})
 	server := &http.Server{
 		Addr:              listenAddress,
