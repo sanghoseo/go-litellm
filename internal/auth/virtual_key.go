@@ -62,6 +62,23 @@ type TeamManager interface {
 	DeleteTeam(context.Context, string) (bool, error)
 }
 
+type ManagedUser struct {
+	UserID    string
+	UserAlias string
+	TeamID    string
+	UserEmail string
+	Models    []string
+	Blocked   bool
+}
+
+type UserManager interface {
+	CreateUser(context.Context, ManagedUser) error
+	GetUser(context.Context, string) (ManagedUser, error)
+	ListUsers(context.Context, int) ([]ManagedUser, error)
+	SetUserBlocked(context.Context, string, bool) (bool, error)
+	DeleteUser(context.Context, string) (bool, error)
+}
+
 type VirtualKeyStore interface {
 	FindVirtualKey(context.Context, string) (VirtualKey, error)
 }

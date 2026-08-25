@@ -59,6 +59,7 @@ type Server struct {
 	metrics         *observability.Metrics
 	keyManager      auth.VirtualKeyManager
 	teamManager     auth.TeamManager
+	userManager     auth.UserManager
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -73,6 +74,11 @@ func (server Server) WithVirtualKeyManager(manager auth.VirtualKeyManager) Serve
 
 func (server Server) WithTeamManager(manager auth.TeamManager) Server {
 	server.teamManager = manager
+	return server
+}
+
+func (server Server) WithUserManager(manager auth.UserManager) Server {
+	server.userManager = manager
 	return server
 }
 
@@ -147,6 +153,12 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /team/block", server.blockTeam)
 	mux.HandleFunc("POST /team/unblock", server.unblockTeam)
 	mux.HandleFunc("POST /team/delete", server.deleteTeam)
+	mux.HandleFunc("POST /user/new", server.createUser)
+	mux.HandleFunc("GET /user/info", server.userInfo)
+	mux.HandleFunc("GET /user/list", server.listUsers)
+	mux.HandleFunc("POST /user/block", server.blockUser)
+	mux.HandleFunc("POST /user/unblock", server.unblockUser)
+	mux.HandleFunc("POST /user/delete", server.deleteUser)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -682,6 +694,135 @@ func nonNilStrings(values []string) []string {
 		return []string{}
 	}
 	return values
+}
+
+type userRequest struct {
+	UserID    string   `json:"user_id"`
+	UserAlias string   `json:"user_alias"`
+	TeamID    string   `json:"team_id"`
+	UserEmail string   `json:"user_email"`
+	Models    []string `json:"models"`
+}
+
+type userResponse struct {
+	UserID    string   `json:"user_id"`
+	UserAlias string   `json:"user_alias,omitempty"`
+	TeamID    string   `json:"team_id,omitempty"`
+	UserEmail string   `json:"user_email,omitempty"`
+	Models    []string `json:"models"`
+	Blocked   bool     `json:"blocked"`
+}
+
+func (server Server) createUser(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.userManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input userRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.UserID == "" {
+		id, err := litellm.UUID4()
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not generate user id", Type: "server_error", Code: "user_creation_failed"})
+			return
+		}
+		input.UserID = "user-" + id
+	}
+	user := auth.ManagedUser{UserID: input.UserID, UserAlias: input.UserAlias, TeamID: input.TeamID, UserEmail: input.UserEmail, Models: input.Models}
+	if err := server.userManager.CreateUser(request.Context(), user); err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create user", Type: "server_error", Code: "user_creation_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, userResponseFrom(user))
+}
+
+func (server Server) userInfo(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.userManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	userID := request.URL.Query().Get("user_id")
+	if userID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'user_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	user, err := server.userManager.GetUser(request.Context(), userID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "User not found", Type: "invalid_request_error", Code: "user_not_found"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, userResponseFrom(user))
+}
+
+func (server Server) listUsers(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.userManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	users, err := server.userManager.ListUsers(request.Context(), 100)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not list users", Type: "server_error", Code: "user_list_failed"})
+		return
+	}
+	response := make([]userResponse, 0, len(users))
+	for _, user := range users {
+		response = append(response, userResponseFrom(user))
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+}
+
+func (server Server) blockUser(writer http.ResponseWriter, request *http.Request) {
+	server.setUserBlocked(writer, request, true)
+}
+func (server Server) unblockUser(writer http.ResponseWriter, request *http.Request) {
+	server.setUserBlocked(writer, request, false)
+}
+
+func (server Server) setUserBlocked(writer http.ResponseWriter, request *http.Request, blocked bool) {
+	if !server.authorizeAdmin(request) || server.userManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.UserID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'user_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.userManager.SetUserBlocked(request.Context(), input.UserID, blocked)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update user", Type: "server_error", Code: "user_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated, "blocked": blocked})
+}
+
+func (server Server) deleteUser(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.userManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.UserID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'user_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deleted, err := server.userManager.DeleteUser(request.Context(), input.UserID)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete user", Type: "server_error", Code: "user_deletion_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
+}
+
+func userResponseFrom(user auth.ManagedUser) userResponse {
+	return userResponse{UserID: user.UserID, UserAlias: user.UserAlias, TeamID: user.TeamID, UserEmail: user.UserEmail, Models: nonNilStrings(user.Models), Blocked: user.Blocked}
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
