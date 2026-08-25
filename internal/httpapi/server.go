@@ -123,6 +123,7 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 
 func (server Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("GET /health/liveliness", server.health)
 	mux.HandleFunc("GET /health/readiness", server.readiness)
 	mux.HandleFunc("GET /v1/models", server.models)

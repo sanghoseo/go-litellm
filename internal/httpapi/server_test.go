@@ -163,6 +163,18 @@ func TestHealthDoesNotRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestLegacyHealthRouteDoesNotRequireAuthentication(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"})
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != "{\"status\":\"ok\"}\n" {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestHandlerPreservesRequestID(t *testing.T) {
 	server := NewServer(config.Config{})
 	request := httptest.NewRequest(http.MethodGet, "/health/liveliness", nil)
