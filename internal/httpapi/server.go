@@ -3,18 +3,27 @@ package httpapi
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 )
 
 type Server struct {
-	config config.Config
+	config        config.Config
+	chatCompleter providers.ChatCompleter
 }
 
-func NewServer(proxyConfig config.Config) Server {
-	return Server{config: proxyConfig}
+func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
+	var chatCompleter providers.ChatCompleter
+	if len(completers) > 0 {
+		chatCompleter = completers[0]
+	}
+	return Server{config: proxyConfig, chatCompleter: chatCompleter}
 }
 
 func (server Server) Handler() http.Handler {
@@ -22,7 +31,100 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health/liveliness", server.health)
 	mux.HandleFunc("GET /health/readiness", server.health)
 	mux.HandleFunc("GET /v1/models", server.models)
+	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	return mux
+}
+
+func (server Server) chatCompletions(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorized(request) {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	if server.chatCompleter == nil {
+		writeJSON(writer, http.StatusServiceUnavailable, openAIError{Message: "No chat completion provider is configured", Type: "server_error", Code: "provider_unavailable"})
+		return
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 10<<20))
+	if err != nil {
+		writeJSON(writer, http.StatusRequestEntityTooLarge, openAIError{Message: "Request body exceeds 10 MiB", Type: "invalid_request_error", Code: "request_too_large"})
+		return
+	}
+	modelName, err := requestedModel(body)
+	if err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: err.Error(), Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deployment, found := server.deploymentFor(modelName)
+	if !found {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
+		return
+	}
+
+	upstream, err := server.chatCompleter.ChatCompletion(request.Context(), deployment, body)
+	if err != nil {
+		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
+		return
+	}
+	defer upstream.Body.Close()
+
+	copyResponseHeaders(writer.Header(), upstream.Header)
+	writer.WriteHeader(upstream.StatusCode)
+	if err := copyResponse(writer, upstream.Body); err != nil {
+		return
+	}
+}
+
+func requestedModel(body []byte) (string, error) {
+	payload := struct {
+		Model string `json:"model"`
+	}{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", errors.New("Request body must be valid JSON")
+	}
+	if payload.Model == "" {
+		return "", errors.New("Missing required parameter: 'model'")
+	}
+	return payload.Model, nil
+}
+
+func (server Server) deploymentFor(modelName string) (config.Model, bool) {
+	for _, configuredModel := range server.config.Models {
+		if configuredModel.Name == modelName {
+			return configuredModel, true
+		}
+	}
+	return config.Model{}, false
+}
+
+func copyResponseHeaders(destination http.Header, source http.Header) {
+	for _, name := range []string{"Content-Type", "Cache-Control", "X-Request-Id"} {
+		if value := source.Get(name); value != "" {
+			destination.Set(name, value)
+		}
+	}
+}
+
+func copyResponse(writer http.ResponseWriter, body io.Reader) error {
+	buffer := make([]byte, 32*1024)
+	flusher, canFlush := writer.(http.Flusher)
+	for {
+		count, readErr := body.Read(buffer)
+		if count > 0 {
+			if _, writeErr := writer.Write(buffer[:count]); writeErr != nil {
+				return writeErr
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
 }
 
 func (server Server) health(writer http.ResponseWriter, _ *http.Request) {

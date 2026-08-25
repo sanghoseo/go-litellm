@@ -15,6 +15,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/httpapi"
 	"github.com/BerriAI/litellm/go-proxy/internal/localdev"
+	"github.com/BerriAI/litellm/go-proxy/internal/providers/openai"
 )
 
 func main() {
@@ -52,7 +53,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServer(proxyConfig).Handler(),
+		Handler:           httpapi.NewServer(proxyConfig, openai.NewClient(nil)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
