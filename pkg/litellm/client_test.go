@@ -97,3 +97,26 @@ func TestCompletionStreamReadsOpenAISSE(t *testing.T) {
 		t.Fatalf("stream error = %v open=%t", err, open)
 	}
 }
+
+func TestTextCompletionStreamReadsOpenAISSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/completions" || request.Header.Get("Accept") != "text/event-stream" {
+			t.Fatalf("path=%q accept=%q", request.URL.Path, request.Header.Get("Accept"))
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: {\"id\":\"cmpl-chunk\",\"object\":\"text_completion\",\"choices\":[{\"text\":\"hello\",\"index\":0}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	stream, err := (Client{BaseURL: server.URL, HTTPClient: server.Client()}).TextCompletionStream(context.Background(), proxytpes.TextCompletionRequest{Model: "gateway-model", Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := <-stream.Chunks
+	if chunk.ID != "cmpl-chunk" || chunk.Choices[0].Text != "hello" {
+		t.Fatalf("chunk=%#v", chunk)
+	}
+	if _, open := <-stream.Chunks; open {
+		t.Fatal("stream must close after [DONE]")
+	}
+}

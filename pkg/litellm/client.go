@@ -19,6 +19,11 @@ type Stream struct {
 	Errors <-chan error
 }
 
+type TextStream struct {
+	Chunks <-chan proxytpes.TextCompletionChunk
+	Errors <-chan error
+}
+
 type Client struct {
 	BaseURL    string
 	APIKey     string
@@ -48,6 +53,44 @@ func (client Client) TextCompletion(ctx context.Context, request proxytpes.TextC
 		return proxytpes.TextCompletionResponse{}, err
 	}
 	return response, nil
+}
+
+func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
+	request.Stream = true
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return TextStream{}, fmt.Errorf("encode request: %w", err)
+	}
+	endpointURL, err := client.endpointURL("completions")
+	if err != nil {
+		return TextStream{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+	if err != nil {
+		return TextStream{}, fmt.Errorf("create request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Accept", "text/event-stream")
+	if client.APIKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+client.APIKey)
+	}
+	httpClient := client.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	response, err := httpClient.Do(httpRequest)
+	if err != nil {
+		return TextStream{}, fmt.Errorf("send request: %w", err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return TextStream{}, &APIError{StatusCode: response.StatusCode, Message: string(body)}
+	}
+	chunks := make(chan proxytpes.TextCompletionChunk)
+	errors := make(chan error, 1)
+	go readTextStream(response.Body, chunks, errors)
+	return TextStream{Chunks: chunks, Errors: errors}, nil
 }
 
 func (client Client) Embedding(ctx context.Context, request proxytpes.EmbeddingRequest) (proxytpes.EmbeddingResponse, error) {
@@ -120,6 +163,33 @@ func readStream(body io.ReadCloser, chunks chan<- proxytpes.ChatCompletionChunk,
 			return
 		}
 		chunk := proxytpes.ChatCompletionChunk{}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			errors <- fmt.Errorf("decode stream chunk: %w", err)
+			return
+		}
+		chunks <- chunk
+	}
+	if err := scanner.Err(); err != nil {
+		errors <- fmt.Errorf("read stream: %w", err)
+	}
+}
+
+func readTextStream(body io.ReadCloser, chunks chan<- proxytpes.TextCompletionChunk, errors chan<- error) {
+	defer body.Close()
+	defer close(chunks)
+	defer close(errors)
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			return
+		}
+		chunk := proxytpes.TextCompletionChunk{}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			errors <- fmt.Errorf("decode stream chunk: %w", err)
 			return
