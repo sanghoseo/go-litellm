@@ -42,6 +42,7 @@ type VirtualKeyManager interface {
 	SetVirtualKeyBlocked(context.Context, string, bool) (bool, error)
 	UpdateVirtualKey(context.Context, string, ManagedVirtualKeyUpdate) (bool, error)
 	ListVirtualKeys(context.Context, int) ([]ManagedVirtualKey, error)
+	RegenerateVirtualKey(context.Context, string, string) (ManagedVirtualKey, error)
 }
 
 type VirtualKeyStore interface {

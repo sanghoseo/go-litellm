@@ -148,3 +148,37 @@ FROM "LiteLLM_VerificationToken" ORDER BY "created_at" DESC NULLS LAST LIMIT $1`
 	}
 	return keys, nil
 }
+
+func (store VirtualKeyStore) RegenerateVirtualKey(ctx context.Context, oldTokenHash, newTokenHash string) (auth.ManagedVirtualKey, error) {
+	if store.pool == nil || oldTokenHash == "" || newTokenHash == "" {
+		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	tx, err := store.pool.Begin(ctx)
+	if err != nil {
+		return auth.ManagedVirtualKey{}, fmt.Errorf("begin virtual key regeneration: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var record auth.ManagedVirtualKey
+	err = tx.QueryRow(ctx, `
+SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), "expires", COALESCE("blocked", false), "rpm_limit"
+FROM "LiteLLM_VerificationToken" WHERE "token" = $1 FOR UPDATE`, oldTokenHash).Scan(&record.TokenHash, &record.KeyAlias, &record.Models, &record.ExpiresAt, &record.Blocked, &record.RPMLimit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	if err != nil {
+		return auth.ManagedVirtualKey{}, fmt.Errorf("load virtual key for regeneration: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM "LiteLLM_VerificationToken" WHERE "token" = $1`, oldTokenHash); err != nil {
+		return auth.ManagedVirtualKey{}, fmt.Errorf("delete old virtual key: %w", err)
+	}
+	record.TokenHash = newTokenHash
+	if _, err := tx.Exec(ctx, `
+INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "expires", "blocked", "rpm_limit")
+VALUES ($1, $2, $3, $4, $5, $6)`, record.TokenHash, record.KeyAlias, record.Models, record.ExpiresAt, record.Blocked, record.RPMLimit); err != nil {
+		return auth.ManagedVirtualKey{}, fmt.Errorf("create regenerated virtual key: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return auth.ManagedVirtualKey{}, fmt.Errorf("commit virtual key regeneration: %w", err)
+	}
+	return record, nil
+}

@@ -53,6 +53,15 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if err != nil || len(keys) != 1 || keys[0].TokenHash != record.TokenHash {
 		t.Fatalf("keys=%#v err=%v", keys, err)
 	}
+	regeneratedHash := auth.HashKey("sk-regenerated-integration-test")
+	regenerated, err := store.RegenerateVirtualKey(context.Background(), record.TokenHash, regeneratedHash)
+	if err != nil || regenerated.TokenHash != regeneratedHash {
+		t.Fatalf("regenerated=%#v err=%v", regenerated, err)
+	}
+	if _, err := store.GetVirtualKey(context.Background(), record.TokenHash); err == nil {
+		t.Fatal("old key hash still exists")
+	}
+	record.TokenHash = regeneratedHash
 	if _, err := store.FindVirtualKey(context.Background(), record.TokenHash); err != nil {
 		t.Fatal(err)
 	}

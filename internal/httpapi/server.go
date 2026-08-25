@@ -121,6 +121,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /key/unblock", server.unblockKey)
 	mux.HandleFunc("POST /key/update", server.updateKey)
 	mux.HandleFunc("GET /key/list", server.listKeys)
+	mux.HandleFunc("POST /key/regenerate", server.regenerateKey)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
@@ -470,6 +471,32 @@ func (server Server) listKeys(writer http.ResponseWriter, request *http.Request)
 		response = append(response, keyResponse{KeyAlias: key.KeyAlias, Models: key.Models, Expires: key.ExpiresAt, Blocked: key.Blocked, RPMLimit: key.RPMLimit})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+}
+
+func (server Server) regenerateKey(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.Key == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'key'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	value, err := litellm.UUID4()
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not generate key", Type: "server_error", Code: "key_generation_failed"})
+		return
+	}
+	rawKey := "sk-" + value
+	record, err := server.keyManager.RegenerateVirtualKey(request.Context(), auth.HashKey(input.Key), auth.HashKey(rawKey))
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Key not found", Type: "invalid_request_error", Code: "key_not_found"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)

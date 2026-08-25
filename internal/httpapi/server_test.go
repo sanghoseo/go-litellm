@@ -78,12 +78,19 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), "sk-test-key") || !strings.Contains(listed.Body.String(), `"key_alias":"updated"`) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
 	}
+	regenerateRequest := httptest.NewRequest(http.MethodPost, "/key/regenerate", strings.NewReader(`{"key":"sk-test-key"}`))
+	regenerateRequest.Header.Set("Authorization", "Bearer master-key")
+	regenerated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(regenerated, regenerateRequest)
+	if regenerated.Code != http.StatusOK || !strings.Contains(regenerated.Body.String(), `"key":"sk-`) || len(manager.records) != 1 {
+		t.Fatalf("regenerate status=%d body=%s records=%v", regenerated.Code, regenerated.Body.String(), manager.records)
+	}
 
 	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
 	deleted := httptest.NewRecorder()
 	server.Handler().ServeHTTP(deleted, deleteRequest)
-	if deleted.Code != http.StatusOK || len(manager.records) != 0 {
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":false`) || len(manager.records) != 1 {
 		t.Fatalf("delete status=%d records=%v", deleted.Code, manager.records)
 	}
 }
@@ -411,6 +418,16 @@ func (manager *memoryKeyManager) ListVirtualKeys(_ context.Context, _ int) ([]au
 		keys = append(keys, key)
 	}
 	return keys, nil
+}
+func (manager *memoryKeyManager) RegenerateVirtualKey(_ context.Context, oldTokenHash, newTokenHash string) (auth.ManagedVirtualKey, error) {
+	record, found := manager.records[oldTokenHash]
+	if !found {
+		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	delete(manager.records, oldTokenHash)
+	record.TokenHash = newTokenHash
+	manager.records[newTokenHash] = record
+	return record, nil
 }
 
 type deploymentCapturingCompleter struct {
