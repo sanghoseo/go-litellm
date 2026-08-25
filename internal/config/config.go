@@ -96,6 +96,12 @@ func Load(path string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("model_list[%d]: %w", index, err)
 		}
+		if model.NumRetries == 0 {
+			model.NumRetries = parsed.LiteLLMSettings.NumRetries
+		}
+		if model.Timeout == 0 {
+			model.Timeout = secondsDuration(parsed.LiteLLMSettings.RequestTimeout)
+		}
 		models = append(models, model)
 	}
 

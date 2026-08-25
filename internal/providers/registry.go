@@ -3,7 +3,9 @@ package providers
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 )
@@ -33,7 +35,7 @@ func (registry Registry) ChatCompletion(ctx context.Context, deployment config.M
 	if err != nil {
 		return Response{}, err
 	}
-	return client.ChatCompletion(ctx, deployment, body)
+	return retry(ctx, deployment, func() (Response, error) { return client.ChatCompletion(ctx, deployment, body) })
 }
 
 func (registry Registry) CreateResponse(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
@@ -41,7 +43,7 @@ func (registry Registry) CreateResponse(ctx context.Context, deployment config.M
 	if err != nil {
 		return Response{}, err
 	}
-	return client.CreateResponse(ctx, deployment, body)
+	return retry(ctx, deployment, func() (Response, error) { return client.CreateResponse(ctx, deployment, body) })
 }
 
 func (registry Registry) CreateEmbedding(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
@@ -49,7 +51,29 @@ func (registry Registry) CreateEmbedding(ctx context.Context, deployment config.
 	if err != nil {
 		return Response{}, err
 	}
-	return client.CreateEmbedding(ctx, deployment, body)
+	return retry(ctx, deployment, func() (Response, error) { return client.CreateEmbedding(ctx, deployment, body) })
+}
+
+func retry(ctx context.Context, deployment config.Model, call func() (Response, error)) (Response, error) {
+	attempts := deployment.NumRetries + 1
+	for attempt := 0; attempt < attempts; attempt++ {
+		response, err := call()
+		if err == nil && response.StatusCode < http.StatusInternalServerError {
+			return response, nil
+		}
+		if attempt+1 == attempts {
+			return response, err
+		}
+		if response.Body != nil {
+			_ = response.Body.Close()
+		}
+		select {
+		case <-ctx.Done():
+			return Response{}, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+		}
+	}
+	return Response{}, nil
 }
 
 func (registry Registry) clientFor(deployment config.Model) (Client, error) {
