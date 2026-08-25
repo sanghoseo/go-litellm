@@ -34,10 +34,33 @@ type Client struct {
 type APIError struct {
 	StatusCode int
 	Message    string
+	Type       string
+	Code       string
+	RetryAfter string
 }
 
 func (errorValue *APIError) Error() string {
 	return fmt.Sprintf("LiteLLM API error (%d): %s", errorValue.StatusCode, errorValue.Message)
+}
+
+func apiErrorFromResponse(statusCode int, header http.Header, body []byte) *APIError {
+	var errorResponse struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    any    `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &errorResponse)
+	message := errorResponse.Error.Message
+	if message == "" {
+		message = string(body)
+	}
+	code := ""
+	if errorResponse.Error.Code != nil {
+		code = fmt.Sprint(errorResponse.Error.Code)
+	}
+	return &APIError{StatusCode: statusCode, Message: message, Type: errorResponse.Error.Type, Code: code, RetryAfter: header.Get("Retry-After")}
 }
 
 func (client Client) Completion(ctx context.Context, request proxytpes.ChatCompletionRequest) (proxytpes.ChatCompletionResponse, error) {
@@ -157,7 +180,7 @@ func (client Client) UploadFile(ctx context.Context, filename string, purpose st
 		return proxytpes.FileObject{}, fmt.Errorf("read response: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return proxytpes.FileObject{}, &APIError{StatusCode: response.StatusCode, Message: string(responseBody)}
+		return proxytpes.FileObject{}, apiErrorFromResponse(response.StatusCode, response.Header, responseBody)
 	}
 	fileObject := proxytpes.FileObject{}
 	if err := json.Unmarshal(responseBody, &fileObject); err != nil {
@@ -228,7 +251,7 @@ func (client Client) TextCompletionStream(ctx context.Context, request proxytpes
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		defer response.Body.Close()
 		body, _ := io.ReadAll(response.Body)
-		return TextStream{}, &APIError{StatusCode: response.StatusCode, Message: string(body)}
+		return TextStream{}, apiErrorFromResponse(response.StatusCode, response.Header, body)
 	}
 	chunks := make(chan proxytpes.TextCompletionChunk)
 	errors := make(chan error, 1)
@@ -282,7 +305,7 @@ func (client Client) CompletionStream(ctx context.Context, request proxytpes.Cha
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		defer response.Body.Close()
 		body, _ := io.ReadAll(response.Body)
-		return Stream{}, &APIError{StatusCode: response.StatusCode, Message: string(body)}
+		return Stream{}, apiErrorFromResponse(response.StatusCode, response.Header, body)
 	}
 	chunks := make(chan proxytpes.ChatCompletionChunk)
 	errors := make(chan error, 1)
@@ -389,17 +412,7 @@ func (client Client) requestJSON(ctx context.Context, method string, endpoint st
 		return fmt.Errorf("read response: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		var errorResponse struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(responseBody, &errorResponse)
-		message := errorResponse.Error.Message
-		if message == "" {
-			message = string(responseBody)
-		}
-		return &APIError{StatusCode: response.StatusCode, Message: message}
+		return apiErrorFromResponse(response.StatusCode, response.Header, responseBody)
 	}
 	if err := json.Unmarshal(responseBody, output); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -448,7 +461,7 @@ func (client Client) requestBytes(ctx context.Context, method string, endpoint s
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, &APIError{StatusCode: response.StatusCode, Message: string(body)}
+		return nil, apiErrorFromResponse(response.StatusCode, response.Header, body)
 	}
 	return body, nil
 }

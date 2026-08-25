@@ -31,13 +31,14 @@ func TestCompletionUsesOpenAIProxyContract(t *testing.T) {
 
 func TestCompletionReturnsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Retry-After", "3")
 		writer.WriteHeader(http.StatusUnauthorized)
-		_, _ = writer.Write([]byte(`{"error":{"message":"bad key"}}`))
+		_, _ = writer.Write([]byte(`{"error":{"message":"bad key","type":"invalid_request_error","code":"invalid_api_key"}}`))
 	}))
 	defer server.Close()
 	_, err := (Client{BaseURL: server.URL, HTTPClient: server.Client()}).Completion(context.Background(), proxytpes.ChatCompletionRequest{Model: "gateway-model"})
 	apiError, ok := err.(*APIError)
-	if !ok || apiError.StatusCode != http.StatusUnauthorized || apiError.Message != "bad key" {
+	if !ok || apiError.StatusCode != http.StatusUnauthorized || apiError.Message != "bad key" || apiError.Type != "invalid_request_error" || apiError.Code != "invalid_api_key" || apiError.RetryAfter != "3" {
 		t.Fatalf("error=%#v", err)
 	}
 }
