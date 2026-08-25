@@ -54,10 +54,16 @@ type Server struct {
 	readinessChecks []ReadinessCheck
 	responseCache   ResponseCache
 	metrics         *observability.Metrics
+	keyManager      auth.VirtualKeyManager
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
 	server.responseCache = cache
+	return server
+}
+
+func (server Server) WithVirtualKeyManager(manager auth.VirtualKeyManager) Server {
+	server.keyManager = manager
 	return server
 }
 
@@ -108,6 +114,9 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health/liveliness", server.health)
 	mux.HandleFunc("GET /health/readiness", server.readiness)
 	mux.HandleFunc("GET /v1/models", server.models)
+	mux.HandleFunc("POST /key/generate", server.generateKey)
+	mux.HandleFunc("GET /key/info", server.keyInfo)
+	mux.HandleFunc("POST /key/delete", server.deleteKey)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
@@ -292,6 +301,92 @@ func (server Server) forwardPassthrough(writer http.ResponseWriter, request *htt
 	copyResponseHeaders(writer.Header(), upstream.Header)
 	writer.WriteHeader(upstream.StatusCode)
 	_ = copyResponse(writer, upstream.Body)
+}
+
+type keyGenerateRequest struct {
+	Key      string     `json:"key"`
+	KeyAlias string     `json:"key_alias"`
+	Models   []string   `json:"models"`
+	Expires  *time.Time `json:"expires"`
+	RPMLimit *int64     `json:"rpm_limit"`
+}
+
+type keyResponse struct {
+	Key      string     `json:"key,omitempty"`
+	KeyAlias string     `json:"key_alias,omitempty"`
+	Models   []string   `json:"models"`
+	Expires  *time.Time `json:"expires,omitempty"`
+	Blocked  bool       `json:"blocked"`
+	RPMLimit *int64     `json:"rpm_limit,omitempty"`
+}
+
+func (server Server) generateKey(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input keyGenerateRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.Expires != nil && !input.Expires.After(time.Now()) {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "expires must be in the future", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	rawKey := input.Key
+	if rawKey == "" {
+		value, err := litellm.UUID4()
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not generate key", Type: "server_error", Code: "key_generation_failed"})
+			return
+		}
+		rawKey = "sk-" + value
+	}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey(rawKey), KeyAlias: input.KeyAlias, Models: input.Models, ExpiresAt: input.Expires, RPMLimit: input.RPMLimit}
+	if err := server.keyManager.CreateVirtualKey(request.Context(), record); err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create key", Type: "server_error", Code: "key_creation_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+}
+
+func (server Server) keyInfo(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	rawKey := request.URL.Query().Get("key")
+	if rawKey == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'key'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	record, err := server.keyManager.GetVirtualKey(request.Context(), auth.HashKey(rawKey))
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Key not found", Type: "invalid_request_error", Code: "key_not_found"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, keyResponse{KeyAlias: record.KeyAlias, Models: record.Models, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+}
+
+func (server Server) deleteKey(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.Key == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'key'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deleted, err := server.keyManager.DeleteVirtualKey(request.Context(), auth.HashKey(input.Key))
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete key", Type: "server_error", Code: "key_deletion_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
@@ -563,6 +658,11 @@ func (server Server) authorize(request *http.Request, model string) (auth.Virtua
 		}
 	}
 	return auth.VirtualKey{}, server.config.MasterKey == "" && server.keyValidator == nil
+}
+
+func (server Server) authorizeAdmin(request *http.Request) bool {
+	provided, found := bearerToken(request)
+	return server.config.MasterKey != "" && found && len(provided) == len(server.config.MasterKey) && subtle.ConstantTimeCompare([]byte(provided), []byte(server.config.MasterKey)) == 1
 }
 
 func bearerToken(request *http.Request) (string, bool) {

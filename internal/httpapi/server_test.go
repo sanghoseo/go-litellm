@@ -28,6 +28,37 @@ func TestModelsRequiresMasterKey(t *testing.T) {
 	}
 }
 
+func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
+	manager := &memoryKeyManager{records: map[string]auth.ManagedVirtualKey{}}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithVirtualKeyManager(manager)
+	generate := httptest.NewRequest(http.MethodPost, "/key/generate", strings.NewReader(`{"key":"sk-test-key","key_alias":"integration","models":["gateway-model"],"rpm_limit":12}`))
+	generate.Header.Set("Authorization", "Bearer master-key")
+	generated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(generated, generate)
+	if generated.Code != http.StatusOK || !strings.Contains(generated.Body.String(), `"key":"sk-test-key"`) {
+		t.Fatalf("generate status=%d body=%s", generated.Code, generated.Body.String())
+	}
+	if _, found := manager.records["sk-test-key"]; found {
+		t.Fatal("manager stored raw key")
+	}
+
+	info := httptest.NewRequest(http.MethodGet, "/key/info?key=sk-test-key", nil)
+	info.Header.Set("Authorization", "Bearer master-key")
+	infoResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(infoResponse, info)
+	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"key_alias":"integration"`) {
+		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
+	deleteRequest.Header.Set("Authorization", "Bearer master-key")
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK || len(manager.records) != 0 {
+		t.Fatalf("delete status=%d records=%v", deleted.Code, manager.records)
+	}
+}
+
 func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(
 		config.Config{Models: []config.Model{
@@ -293,6 +324,29 @@ func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 }
 
 type stubChatCompleter struct{}
+
+type memoryKeyManager struct {
+	records map[string]auth.ManagedVirtualKey
+}
+
+func (manager *memoryKeyManager) CreateVirtualKey(_ context.Context, record auth.ManagedVirtualKey) error {
+	manager.records[record.TokenHash] = record
+	return nil
+}
+func (manager *memoryKeyManager) GetVirtualKey(_ context.Context, tokenHash string) (auth.ManagedVirtualKey, error) {
+	record, found := manager.records[tokenHash]
+	if !found {
+		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	return record, nil
+}
+func (manager *memoryKeyManager) DeleteVirtualKey(_ context.Context, tokenHash string) (bool, error) {
+	if _, found := manager.records[tokenHash]; !found {
+		return false, nil
+	}
+	delete(manager.records, tokenHash)
+	return true, nil
+}
 
 type deploymentCapturingCompleter struct {
 	bases chan string

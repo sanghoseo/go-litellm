@@ -40,3 +40,44 @@ WHERE "token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.ExpiresAt
 	}
 	return key, nil
 }
+
+func (store VirtualKeyStore) CreateVirtualKey(ctx context.Context, record auth.ManagedVirtualKey) error {
+	if store.pool == nil || record.TokenHash == "" {
+		return auth.ErrInvalidVirtualKey
+	}
+	_, err := store.pool.Exec(ctx, `
+INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "expires", "blocked", "rpm_limit")
+VALUES ($1, $2, $3, $4, $5, $6)`, record.TokenHash, record.KeyAlias, record.Models, record.ExpiresAt, record.Blocked, record.RPMLimit)
+	if err != nil {
+		return fmt.Errorf("create virtual key: %w", err)
+	}
+	return nil
+}
+
+func (store VirtualKeyStore) GetVirtualKey(ctx context.Context, tokenHash string) (auth.ManagedVirtualKey, error) {
+	if store.pool == nil {
+		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	var record auth.ManagedVirtualKey
+	err := store.pool.QueryRow(ctx, `
+SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), "expires", COALESCE("blocked", false), "rpm_limit"
+FROM "LiteLLM_VerificationToken" WHERE "token" = $1`, tokenHash).Scan(&record.TokenHash, &record.KeyAlias, &record.Models, &record.ExpiresAt, &record.Blocked, &record.RPMLimit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
+	}
+	if err != nil {
+		return auth.ManagedVirtualKey{}, fmt.Errorf("get virtual key: %w", err)
+	}
+	return record, nil
+}
+
+func (store VirtualKeyStore) DeleteVirtualKey(ctx context.Context, tokenHash string) (bool, error) {
+	if store.pool == nil {
+		return false, auth.ErrInvalidVirtualKey
+	}
+	result, err := store.pool.Exec(ctx, `DELETE FROM "LiteLLM_VerificationToken" WHERE "token" = $1`, tokenHash)
+	if err != nil {
+		return false, fmt.Errorf("delete virtual key: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}

@@ -19,6 +19,21 @@ type VirtualKey struct {
 	RPMLimit  *int64
 }
 
+type ManagedVirtualKey struct {
+	TokenHash string
+	KeyAlias  string
+	Models    []string
+	ExpiresAt *time.Time
+	Blocked   bool
+	RPMLimit  *int64
+}
+
+type VirtualKeyManager interface {
+	CreateVirtualKey(context.Context, ManagedVirtualKey) error
+	GetVirtualKey(context.Context, string) (ManagedVirtualKey, error)
+	DeleteVirtualKey(context.Context, string) (bool, error)
+}
+
 type VirtualKeyStore interface {
 	FindVirtualKey(context.Context, string) (VirtualKey, error)
 }

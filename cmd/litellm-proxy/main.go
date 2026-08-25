@@ -64,6 +64,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 
 	var database *pgxpool.Pool
 	var keyValidator httpapi.VirtualKeyValidator
+	var keyManager auth.VirtualKeyManager
 	var usageRecorder usage.Recorder
 	var requestLimiter httpapi.RequestLimiter
 	var responseCache httpapi.ResponseCache
@@ -77,7 +78,9 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		if err := postgres.EnsureCoreSchema(context.Background(), database); err != nil {
 			return fmt.Errorf("initialize PostgreSQL schema: %w", err)
 		}
-		keyValidator = auth.NewValidator(postgres.NewVirtualKeyStore(database))
+		virtualKeyStore := postgres.NewVirtualKeyStore(database)
+		keyValidator = auth.NewValidator(virtualKeyStore)
+		keyManager = virtualKeyStore
 		usageRecorder = postgres.NewSpendLogStore(database)
 		readinessChecks = append(readinessChecks, database)
 	}
@@ -112,7 +115,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	})
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).Handler(),
+		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithVirtualKeyManager(keyManager).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
