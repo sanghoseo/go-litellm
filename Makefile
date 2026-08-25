@@ -91,7 +91,7 @@ go-test:
 	go test ./cmd/litellm-proxy ./internal/... ./pkg/... ./litellm
 
 go-test-race:
-	go test -race ./...
+	go test -race ./cmd/litellm-proxy ./internal/... ./pkg/... ./litellm
 
 go-run:
 	go run $(GO_PROXY_PACKAGE) --config config.yaml
