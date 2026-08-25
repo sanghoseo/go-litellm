@@ -396,26 +396,28 @@ func (server Server) forwardPassthrough(writer http.ResponseWriter, request *htt
 }
 
 type keyGenerateRequest struct {
-	Key       string     `json:"key"`
-	KeyAlias  string     `json:"key_alias"`
-	Models    []string   `json:"models"`
-	UserID    string     `json:"user_id"`
-	TeamID    string     `json:"team_id"`
-	ProjectID string     `json:"project_id"`
-	Expires   *time.Time `json:"expires"`
-	RPMLimit  *int64     `json:"rpm_limit"`
+	Key            string     `json:"key"`
+	KeyAlias       string     `json:"key_alias"`
+	Models         []string   `json:"models"`
+	UserID         string     `json:"user_id"`
+	TeamID         string     `json:"team_id"`
+	ProjectID      string     `json:"project_id"`
+	OrganizationID string     `json:"organization_id"`
+	Expires        *time.Time `json:"expires"`
+	RPMLimit       *int64     `json:"rpm_limit"`
 }
 
 type keyResponse struct {
-	Key       string     `json:"key,omitempty"`
-	KeyAlias  string     `json:"key_alias,omitempty"`
-	Models    []string   `json:"models"`
-	UserID    string     `json:"user_id,omitempty"`
-	TeamID    string     `json:"team_id,omitempty"`
-	ProjectID string     `json:"project_id,omitempty"`
-	Expires   *time.Time `json:"expires,omitempty"`
-	Blocked   bool       `json:"blocked"`
-	RPMLimit  *int64     `json:"rpm_limit,omitempty"`
+	Key            string     `json:"key,omitempty"`
+	KeyAlias       string     `json:"key_alias,omitempty"`
+	Models         []string   `json:"models"`
+	UserID         string     `json:"user_id,omitempty"`
+	TeamID         string     `json:"team_id,omitempty"`
+	ProjectID      string     `json:"project_id,omitempty"`
+	OrganizationID string     `json:"organization_id,omitempty"`
+	Expires        *time.Time `json:"expires,omitempty"`
+	Blocked        bool       `json:"blocked"`
+	RPMLimit       *int64     `json:"rpm_limit,omitempty"`
 }
 
 type keyUpdateRequest struct {
@@ -449,12 +451,12 @@ func (server Server) generateKey(writer http.ResponseWriter, request *http.Reque
 		}
 		rawKey = "sk-" + value
 	}
-	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey(rawKey), KeyAlias: input.KeyAlias, Models: input.Models, UserID: input.UserID, TeamID: input.TeamID, ProjectID: input.ProjectID, ExpiresAt: input.Expires, RPMLimit: input.RPMLimit}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey(rawKey), KeyAlias: input.KeyAlias, Models: input.Models, UserID: input.UserID, TeamID: input.TeamID, ProjectID: input.ProjectID, OrganizationID: input.OrganizationID, ExpiresAt: input.Expires, RPMLimit: input.RPMLimit}
 	if err := server.keyManager.CreateVirtualKey(request.Context(), record); err != nil {
 		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create key", Type: "server_error", Code: "key_creation_failed"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, OrganizationID: record.OrganizationID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 func (server Server) keyInfo(writer http.ResponseWriter, request *http.Request) {
@@ -472,7 +474,7 @@ func (server Server) keyInfo(writer http.ResponseWriter, request *http.Request) 
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Key not found", Type: "invalid_request_error", Code: "key_not_found"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, keyResponse{KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+	writeJSON(writer, http.StatusOK, keyResponse{KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, OrganizationID: record.OrganizationID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 func (server Server) deleteKey(writer http.ResponseWriter, request *http.Request) {
@@ -561,7 +563,7 @@ func (server Server) listKeys(writer http.ResponseWriter, request *http.Request)
 	}
 	response := make([]keyResponse, 0, len(keys))
 	for _, key := range keys {
-		response = append(response, keyResponse{KeyAlias: key.KeyAlias, Models: key.Models, UserID: key.UserID, TeamID: key.TeamID, ProjectID: key.ProjectID, Expires: key.ExpiresAt, Blocked: key.Blocked, RPMLimit: key.RPMLimit})
+		response = append(response, keyResponse{KeyAlias: key.KeyAlias, Models: key.Models, UserID: key.UserID, TeamID: key.TeamID, ProjectID: key.ProjectID, OrganizationID: key.OrganizationID, Expires: key.ExpiresAt, Blocked: key.Blocked, RPMLimit: key.RPMLimit})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
 }
@@ -589,7 +591,7 @@ func (server Server) regenerateKey(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Key not found", Type: "invalid_request_error", Code: "key_not_found"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, OrganizationID: record.OrganizationID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 type teamRequest struct {
@@ -1203,7 +1205,11 @@ func (server Server) updateOrganization(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 404, openAIError{Message: "Organization not found", Type: "invalid_request_error", Code: "organization_not_found"})
 		return
 	}
-	o, _ := server.organizationManager.GetOrganization(r.Context(), in.OrganizationID)
+	o, e := server.organizationManager.GetOrganization(r.Context(), in.OrganizationID)
+	if e != nil {
+		writeJSON(w, 500, openAIError{Message: "Could not load organization", Type: "server_error", Code: "organization_load_failed"})
+		return
+	}
 	writeJSON(w, 200, organizationResponseFrom(o))
 }
 func (server Server) deleteOrganization(w http.ResponseWriter, r *http.Request) {

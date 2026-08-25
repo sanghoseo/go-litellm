@@ -31,7 +31,7 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Hour)
 	store := NewVirtualKeyStore(pool)
 	teamStore := NewTeamStore(pool)
-	if err := teamStore.CreateTeam(context.Background(), auth.ManagedTeam{TeamID: "team-key-integration", Models: []string{"gateway-model", "team-model", "project-model", "user-restricted-model"}}); err != nil {
+	if err := teamStore.CreateTeam(context.Background(), auth.ManagedTeam{TeamID: "team-key-integration", Models: []string{"gateway-model", "team-model", "project-model", "user-restricted-model", "organization-restricted-model"}}); err != nil {
 		t.Fatal(err)
 	}
 	userStore := NewUserStore(pool)
@@ -39,15 +39,19 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectStore := NewProjectStore(pool)
-	if err := projectStore.CreateProject(context.Background(), auth.ManagedProject{ProjectID: "project-key-integration", TeamID: "team-key-integration", Models: []string{"gateway-model", "project-model", "user-restricted-model"}}); err != nil {
+	if err := projectStore.CreateProject(context.Background(), auth.ManagedProject{ProjectID: "project-key-integration", TeamID: "team-key-integration", Models: []string{"gateway-model", "project-model", "user-restricted-model", "organization-restricted-model"}}); err != nil {
 		t.Fatal(err)
 	}
-	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model", "team-model", "project-model", "user-restricted-model"}, UserID: "user-key-integration", TeamID: "team-key-integration", ProjectID: "project-key-integration", ExpiresAt: &expires}
+	organizationStore := NewOrganizationStore(pool)
+	if err := organizationStore.CreateOrganization(context.Background(), auth.ManagedOrganization{OrganizationID: "organization-key-integration", Models: []string{"gateway-model"}}); err != nil {
+		t.Fatal(err)
+	}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model", "team-model", "project-model", "user-restricted-model", "organization-restricted-model"}, UserID: "user-key-integration", TeamID: "team-key-integration", ProjectID: "project-key-integration", OrganizationID: "organization-key-integration", ExpiresAt: &expires}
 	if err := store.CreateVirtualKey(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.GetVirtualKey(context.Background(), record.TokenHash)
-	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || len(loaded.Models) != 4 {
+	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || loaded.OrganizationID != record.OrganizationID || len(loaded.Models) != 5 {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
 	}
 	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "project-model"); err == nil {
@@ -58,6 +62,9 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	}
 	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "user-restricted-model"); err == nil {
 		t.Fatal("key accepted a model disallowed by its user")
+	}
+	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "organization-restricted-model"); err == nil {
+		t.Fatal("key accepted a model disallowed by its organization")
 	}
 	alias := "updated"
 	models := []string{"other-model"}
@@ -76,7 +83,7 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	}
 	regeneratedHash := auth.HashKey("sk-regenerated-integration-test")
 	regenerated, err := store.RegenerateVirtualKey(context.Background(), record.TokenHash, regeneratedHash)
-	if err != nil || regenerated.TokenHash != regeneratedHash || regenerated.ProjectID != record.ProjectID {
+	if err != nil || regenerated.TokenHash != regeneratedHash || regenerated.ProjectID != record.ProjectID || regenerated.OrganizationID != record.OrganizationID {
 		t.Fatalf("regenerated=%#v err=%v", regenerated, err)
 	}
 	if _, err := store.GetVirtualKey(context.Background(), record.TokenHash); err == nil {
@@ -111,8 +118,20 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "gateway-model"); err == nil {
 		t.Fatal("key attached to blocked project was accepted")
 	}
+	if _, err := projectStore.SetProjectBlocked(context.Background(), record.ProjectID, false); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = organizationStore.UpdateOrganization(context.Background(), record.OrganizationID, auth.ManagedOrganizationUpdate{Blocked: boolPointer(true)})
+	if err != nil || !updated {
+		t.Fatalf("organization updated=%t err=%v", updated, err)
+	}
+	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "gateway-model"); err == nil {
+		t.Fatal("key attached to blocked organization was accepted")
+	}
 	deleted, err := store.DeleteVirtualKey(context.Background(), record.TokenHash)
 	if err != nil || !deleted {
 		t.Fatalf("deleted=%t err=%v", deleted, err)
 	}
 }
+
+func boolPointer(value bool) *bool { return &value }

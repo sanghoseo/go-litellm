@@ -12,30 +12,33 @@ import (
 var ErrInvalidVirtualKey = errors.New("invalid virtual key")
 
 type VirtualKey struct {
-	TokenHash     string
-	Models        []string
-	UserID        string
-	UserModels    []string
-	TeamID        string
-	TeamModels    []string
-	ProjectID     string
-	ProjectModels []string
-	ExpiresAt     *time.Time
-	Blocked       bool
-	RPMLimit      *int64
+	TokenHash          string
+	Models             []string
+	UserID             string
+	UserModels         []string
+	TeamID             string
+	TeamModels         []string
+	ProjectID          string
+	ProjectModels      []string
+	OrganizationID     string
+	OrganizationModels []string
+	ExpiresAt          *time.Time
+	Blocked            bool
+	RPMLimit           *int64
 }
 
 type ManagedVirtualKey struct {
-	TokenHash  string
-	KeyAlias   string
-	Models     []string
-	UserID     string
-	TeamID     string
-	TeamModels []string
-	ProjectID  string
-	ExpiresAt  *time.Time
-	Blocked    bool
-	RPMLimit   *int64
+	TokenHash      string
+	KeyAlias       string
+	Models         []string
+	UserID         string
+	TeamID         string
+	TeamModels     []string
+	ProjectID      string
+	OrganizationID string
+	ExpiresAt      *time.Time
+	Blocked        bool
+	RPMLimit       *int64
 }
 
 type ManagedVirtualKeyUpdate struct {
@@ -192,6 +195,9 @@ func (validator Validator) Validate(ctx context.Context, rawKey string, model st
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	if model != "" && len(virtualKey.ProjectModels) > 0 && !contains(virtualKey.ProjectModels, model) {
+		return VirtualKey{}, ErrInvalidVirtualKey
+	}
+	if model != "" && len(virtualKey.OrganizationModels) > 0 && !contains(virtualKey.OrganizationModels, model) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	return virtualKey, nil

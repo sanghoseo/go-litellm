@@ -31,7 +31,7 @@ func TestModelsRequiresMasterKey(t *testing.T) {
 func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	manager := &memoryKeyManager{records: map[string]auth.ManagedVirtualKey{}}
 	server := NewServer(config.Config{MasterKey: "master-key"}).WithVirtualKeyManager(manager)
-	generate := httptest.NewRequest(http.MethodPost, "/key/generate", strings.NewReader(`{"key":"sk-test-key","key_alias":"integration","models":["gateway-model"],"rpm_limit":12}`))
+	generate := httptest.NewRequest(http.MethodPost, "/key/generate", strings.NewReader(`{"key":"sk-test-key","key_alias":"integration","models":["gateway-model"],"organization_id":"org-test","rpm_limit":12}`))
 	generate.Header.Set("Authorization", "Bearer master-key")
 	generated := httptest.NewRecorder()
 	server.Handler().ServeHTTP(generated, generate)
@@ -40,6 +40,9 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	}
 	if _, found := manager.records["sk-test-key"]; found {
 		t.Fatal("manager stored raw key")
+	}
+	if manager.records[auth.HashKey("sk-test-key")].OrganizationID != "org-test" {
+		t.Fatalf("organization scope was not persisted: %#v", manager.records)
 	}
 
 	info := httptest.NewRequest(http.MethodGet, "/key/info?key=sk-test-key", nil)
@@ -208,6 +211,46 @@ func TestProjectManagementLifecycle(t *testing.T) {
 	server.Handler().ServeHTTP(deleted, deleteRequest)
 	if deleted.Code != http.StatusOK || len(manager.projects) != 0 {
 		t.Fatalf("delete status=%d projects=%#v", deleted.Code, manager.projects)
+	}
+}
+
+func TestOrganizationManagementLifecycle(t *testing.T) {
+	manager := &memoryOrganizationManager{organizations: map[string]auth.ManagedOrganization{}}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithOrganizationManager(manager)
+	create := httptest.NewRequest(http.MethodPost, "/organization/new", strings.NewReader(`{"organization_id":"org-test","organization_alias":"Platform","budget_id":"budget-test","models":["gateway-model"]}`))
+	create.Header.Set("Authorization", "Bearer master-key")
+	created := httptest.NewRecorder()
+	server.Handler().ServeHTTP(created, create)
+	if created.Code != http.StatusOK || manager.organizations["org-test"].OrganizationAlias != "Platform" {
+		t.Fatalf("create status=%d organizations=%#v", created.Code, manager.organizations)
+	}
+	info := httptest.NewRequest(http.MethodGet, "/organization/info?organization_id=org-test", nil)
+	info.Header.Set("Authorization", "Bearer master-key")
+	infoResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(infoResponse, info)
+	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"budget_id":"budget-test"`) {
+		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
+	}
+	update := httptest.NewRequest(http.MethodPost, "/organization/update", strings.NewReader(`{"organization_id":"org-test","organization_alias":"Updated","blocked":true}`))
+	update.Header.Set("Authorization", "Bearer master-key")
+	updated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || manager.organizations["org-test"].OrganizationAlias != "Updated" || !manager.organizations["org-test"].Blocked {
+		t.Fatalf("update status=%d organization=%#v", updated.Code, manager.organizations["org-test"])
+	}
+	list := httptest.NewRequest(http.MethodGet, "/organization/list", nil)
+	list.Header.Set("Authorization", "Bearer master-key")
+	listed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"organization_id":"org-test"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/organization/delete", strings.NewReader(`{"organization_id":"org-test"}`))
+	deleteRequest.Header.Set("Authorization", "Bearer master-key")
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK || len(manager.organizations) != 0 {
+		t.Fatalf("delete status=%d organizations=%#v", deleted.Code, manager.organizations)
 	}
 }
 
@@ -583,6 +626,60 @@ type memoryUserManager struct {
 
 type memoryProjectManager struct {
 	projects map[string]auth.ManagedProject
+}
+
+type memoryOrganizationManager struct {
+	organizations map[string]auth.ManagedOrganization
+}
+
+func (manager *memoryOrganizationManager) CreateOrganization(_ context.Context, organization auth.ManagedOrganization) error {
+	manager.organizations[organization.OrganizationID] = organization
+	return nil
+}
+
+func (manager *memoryOrganizationManager) GetOrganization(_ context.Context, organizationID string) (auth.ManagedOrganization, error) {
+	organization, found := manager.organizations[organizationID]
+	if !found {
+		return auth.ManagedOrganization{}, auth.ErrInvalidVirtualKey
+	}
+	return organization, nil
+}
+
+func (manager *memoryOrganizationManager) ListOrganizations(_ context.Context, _ int) ([]auth.ManagedOrganization, error) {
+	organizations := make([]auth.ManagedOrganization, 0, len(manager.organizations))
+	for _, organization := range manager.organizations {
+		organizations = append(organizations, organization)
+	}
+	return organizations, nil
+}
+
+func (manager *memoryOrganizationManager) UpdateOrganization(_ context.Context, organizationID string, update auth.ManagedOrganizationUpdate) (bool, error) {
+	organization, found := manager.organizations[organizationID]
+	if !found {
+		return false, nil
+	}
+	if update.OrganizationAlias != nil {
+		organization.OrganizationAlias = *update.OrganizationAlias
+	}
+	if update.BudgetID != nil {
+		organization.BudgetID = *update.BudgetID
+	}
+	if update.Models != nil {
+		organization.Models = *update.Models
+	}
+	if update.Blocked != nil {
+		organization.Blocked = *update.Blocked
+	}
+	manager.organizations[organizationID] = organization
+	return true, nil
+}
+
+func (manager *memoryOrganizationManager) DeleteOrganization(_ context.Context, organizationID string) (bool, error) {
+	if _, found := manager.organizations[organizationID]; !found {
+		return false, nil
+	}
+	delete(manager.organizations, organizationID)
+	return true, nil
 }
 
 func (manager *memoryProjectManager) CreateProject(_ context.Context, project auth.ManagedProject) error {
