@@ -34,12 +34,16 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if err := teamStore.CreateTeam(context.Background(), auth.ManagedTeam{TeamID: "team-key-integration"}); err != nil {
 		t.Fatal(err)
 	}
-	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model"}, TeamID: "team-key-integration", ExpiresAt: &expires}
+	projectStore := NewProjectStore(pool)
+	if err := projectStore.CreateProject(context.Background(), auth.ManagedProject{ProjectID: "project-key-integration", TeamID: "team-key-integration"}); err != nil {
+		t.Fatal(err)
+	}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model"}, TeamID: "team-key-integration", ProjectID: "project-key-integration", ExpiresAt: &expires}
 	if err := store.CreateVirtualKey(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.GetVirtualKey(context.Background(), record.TokenHash)
-	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || len(loaded.Models) != 1 || loaded.Models[0] != "gateway-model" {
+	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || len(loaded.Models) != 1 || loaded.Models[0] != "gateway-model" {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
 	}
 	alias := "updated"
@@ -59,7 +63,7 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	}
 	regeneratedHash := auth.HashKey("sk-regenerated-integration-test")
 	regenerated, err := store.RegenerateVirtualKey(context.Background(), record.TokenHash, regeneratedHash)
-	if err != nil || regenerated.TokenHash != regeneratedHash {
+	if err != nil || regenerated.TokenHash != regeneratedHash || regenerated.ProjectID != record.ProjectID {
 		t.Fatalf("regenerated=%#v err=%v", regenerated, err)
 	}
 	if _, err := store.GetVirtualKey(context.Background(), record.TokenHash); err == nil {
@@ -84,6 +88,15 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	}
 	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "gateway-model"); err == nil {
 		t.Fatal("key attached to blocked team was accepted")
+	}
+	if _, err := teamStore.SetTeamBlocked(context.Background(), record.TeamID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projectStore.SetProjectBlocked(context.Background(), record.ProjectID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "gateway-model"); err == nil {
+		t.Fatal("key attached to blocked project was accepted")
 	}
 	deleted, err := store.DeleteVirtualKey(context.Background(), record.TokenHash)
 	if err != nil || !deleted {

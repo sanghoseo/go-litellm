@@ -63,8 +63,8 @@ func (store VirtualKeyStore) GetVirtualKey(ctx context.Context, tokenHash string
 	}
 	var record auth.ManagedVirtualKey
 	err := store.pool.QueryRow(ctx, `
-SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), COALESCE("user_id", ''), COALESCE("team_id", ''), "expires", COALESCE("blocked", false), "rpm_limit"
-FROM "LiteLLM_VerificationToken" WHERE "token" = $1`, tokenHash).Scan(&record.TokenHash, &record.KeyAlias, &record.Models, &record.UserID, &record.TeamID, &record.ExpiresAt, &record.Blocked, &record.RPMLimit)
+SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), COALESCE("user_id", ''), COALESCE("team_id", ''), COALESCE("project_id", ''), "expires", COALESCE("blocked", false), "rpm_limit"
+FROM "LiteLLM_VerificationToken" WHERE "token" = $1`, tokenHash).Scan(&record.TokenHash, &record.KeyAlias, &record.Models, &record.UserID, &record.TeamID, &record.ProjectID, &record.ExpiresAt, &record.Blocked, &record.RPMLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
 	}
@@ -132,7 +132,7 @@ func (store VirtualKeyStore) ListVirtualKeys(ctx context.Context, limit int) ([]
 		limit = 100
 	}
 	rows, err := store.pool.Query(ctx, `
-SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), COALESCE("user_id", ''), COALESCE("team_id", ''), "expires", COALESCE("blocked", false), "rpm_limit"
+SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), COALESCE("user_id", ''), COALESCE("team_id", ''), COALESCE("project_id", ''), "expires", COALESCE("blocked", false), "rpm_limit"
 FROM "LiteLLM_VerificationToken" ORDER BY "created_at" DESC NULLS LAST LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list virtual keys: %w", err)
@@ -141,7 +141,7 @@ FROM "LiteLLM_VerificationToken" ORDER BY "created_at" DESC NULLS LAST LIMIT $1`
 	keys := []auth.ManagedVirtualKey{}
 	for rows.Next() {
 		var key auth.ManagedVirtualKey
-		if err := rows.Scan(&key.TokenHash, &key.KeyAlias, &key.Models, &key.UserID, &key.TeamID, &key.ExpiresAt, &key.Blocked, &key.RPMLimit); err != nil {
+		if err := rows.Scan(&key.TokenHash, &key.KeyAlias, &key.Models, &key.UserID, &key.TeamID, &key.ProjectID, &key.ExpiresAt, &key.Blocked, &key.RPMLimit); err != nil {
 			return nil, fmt.Errorf("scan virtual key: %w", err)
 		}
 		keys = append(keys, key)
@@ -163,8 +163,8 @@ func (store VirtualKeyStore) RegenerateVirtualKey(ctx context.Context, oldTokenH
 	defer tx.Rollback(ctx)
 	var record auth.ManagedVirtualKey
 	err = tx.QueryRow(ctx, `
-SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), COALESCE("user_id", ''), COALESCE("team_id", ''), "expires", COALESCE("blocked", false), "rpm_limit"
-FROM "LiteLLM_VerificationToken" WHERE "token" = $1 FOR UPDATE`, oldTokenHash).Scan(&record.TokenHash, &record.KeyAlias, &record.Models, &record.UserID, &record.TeamID, &record.ExpiresAt, &record.Blocked, &record.RPMLimit)
+SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), COALESCE("user_id", ''), COALESCE("team_id", ''), COALESCE("project_id", ''), "expires", COALESCE("blocked", false), "rpm_limit"
+FROM "LiteLLM_VerificationToken" WHERE "token" = $1 FOR UPDATE`, oldTokenHash).Scan(&record.TokenHash, &record.KeyAlias, &record.Models, &record.UserID, &record.TeamID, &record.ProjectID, &record.ExpiresAt, &record.Blocked, &record.RPMLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.ManagedVirtualKey{}, auth.ErrInvalidVirtualKey
 	}
@@ -176,8 +176,8 @@ FROM "LiteLLM_VerificationToken" WHERE "token" = $1 FOR UPDATE`, oldTokenHash).S
 	}
 	record.TokenHash = newTokenHash
 	if _, err := tx.Exec(ctx, `
-INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "user_id", "team_id", "expires", "blocked", "rpm_limit")
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, record.TokenHash, record.KeyAlias, record.Models, record.UserID, record.TeamID, record.ExpiresAt, record.Blocked, record.RPMLimit); err != nil {
+INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "user_id", "team_id", "project_id", "expires", "blocked", "rpm_limit")
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, record.TokenHash, record.KeyAlias, record.Models, record.UserID, record.TeamID, record.ProjectID, record.ExpiresAt, record.Blocked, record.RPMLimit); err != nil {
 		return auth.ManagedVirtualKey{}, fmt.Errorf("create regenerated virtual key: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

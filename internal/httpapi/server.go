@@ -440,7 +440,7 @@ func (server Server) generateKey(writer http.ResponseWriter, request *http.Reque
 		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create key", Type: "server_error", Code: "key_creation_failed"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 func (server Server) keyInfo(writer http.ResponseWriter, request *http.Request) {
@@ -458,7 +458,7 @@ func (server Server) keyInfo(writer http.ResponseWriter, request *http.Request) 
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Key not found", Type: "invalid_request_error", Code: "key_not_found"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, keyResponse{KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+	writeJSON(writer, http.StatusOK, keyResponse{KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 func (server Server) deleteKey(writer http.ResponseWriter, request *http.Request) {
@@ -547,7 +547,7 @@ func (server Server) listKeys(writer http.ResponseWriter, request *http.Request)
 	}
 	response := make([]keyResponse, 0, len(keys))
 	for _, key := range keys {
-		response = append(response, keyResponse{KeyAlias: key.KeyAlias, Models: key.Models, UserID: key.UserID, TeamID: key.TeamID, Expires: key.ExpiresAt, Blocked: key.Blocked, RPMLimit: key.RPMLimit})
+		response = append(response, keyResponse{KeyAlias: key.KeyAlias, Models: key.Models, UserID: key.UserID, TeamID: key.TeamID, ProjectID: key.ProjectID, Expires: key.ExpiresAt, Blocked: key.Blocked, RPMLimit: key.RPMLimit})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
 }
@@ -575,7 +575,7 @@ func (server Server) regenerateKey(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Key not found", Type: "invalid_request_error", Code: "key_not_found"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
+	writeJSON(writer, http.StatusOK, keyResponse{Key: rawKey, KeyAlias: record.KeyAlias, Models: record.Models, UserID: record.UserID, TeamID: record.TeamID, ProjectID: record.ProjectID, Expires: record.ExpiresAt, Blocked: record.Blocked, RPMLimit: record.RPMLimit})
 }
 
 type teamRequest struct {
