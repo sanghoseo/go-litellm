@@ -136,6 +136,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	mux.HandleFunc("POST /v1/moderations", server.moderations)
 	mux.HandleFunc("POST /v1/images/generations", server.images)
+	mux.HandleFunc("POST /v1/images/edits", server.imageEdits)
 	mux.HandleFunc("POST /v1/audio/speech", server.speech)
 	mux.HandleFunc("POST /v1/audio/transcriptions", server.transcription)
 	mux.HandleFunc("POST /v1/audio/translations", server.translation)
@@ -213,6 +214,10 @@ func (server Server) images(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	server.forwardModelRequest(writer, request, server.imageGenerator.GenerateImage)
+}
+
+func (server Server) imageEdits(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "images/edits")
 }
 
 func (server Server) speech(writer http.ResponseWriter, request *http.Request) {
