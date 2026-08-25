@@ -3,6 +3,7 @@ package litellm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -122,6 +123,19 @@ func TestClientFileReadAndDeleteOperations(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"id":"file-1","object":"file","deleted":true}`))
 		case "GET /v1/files/file-1/content":
 			_, _ = writer.Write([]byte("file-content"))
+		case "POST /v1/files":
+			if err := request.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatal(err)
+			}
+			file, _, err := request.FormFile("file")
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents, _ := io.ReadAll(file)
+			if string(contents) != "jsonl-content" || request.FormValue("purpose") != "batch" {
+				t.Fatalf("content=%q purpose=%q", contents, request.FormValue("purpose"))
+			}
+			_, _ = writer.Write([]byte(`{"id":"file-2","filename":"input.jsonl","purpose":"batch"}`))
 		default:
 			t.Fatalf("request=%s %s", request.Method, request.URL.Path)
 		}
@@ -143,6 +157,10 @@ func TestClientFileReadAndDeleteOperations(t *testing.T) {
 	content, err := client.DownloadFileContent(context.Background(), "file-1")
 	if err != nil || string(content) != "file-content" {
 		t.Fatalf("content=%q err=%v", content, err)
+	}
+	uploaded, err := client.UploadFile(context.Background(), "input.jsonl", "batch", []byte("jsonl-content"))
+	if err != nil || uploaded.ID != "file-2" || uploaded.Purpose != "batch" {
+		t.Fatalf("uploaded=%#v err=%v", uploaded, err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -109,6 +110,60 @@ func (client Client) DeleteFile(ctx context.Context, fileID string) (proxytpes.F
 
 func (client Client) DownloadFileContent(ctx context.Context, fileID string) ([]byte, error) {
 	return client.requestBytes(ctx, http.MethodGet, "files/"+url.PathEscape(fileID)+"/content", nil)
+}
+
+func (client Client) UploadFile(ctx context.Context, filename string, purpose string, content []byte) (proxytpes.FileObject, error) {
+	if filename == "" || purpose == "" {
+		return proxytpes.FileObject{}, fmt.Errorf("filename and purpose are required")
+	}
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	file, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("create file form field: %w", err)
+	}
+	if _, err := file.Write(content); err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("write file content: %w", err)
+	}
+	if err := writer.WriteField("purpose", purpose); err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("write purpose form field: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("close multipart body: %w", err)
+	}
+	endpointURL, err := client.endpointURL("files")
+	if err != nil {
+		return proxytpes.FileObject{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, body)
+	if err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("create request: %w", err)
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	if client.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+client.APIKey)
+	}
+	httpClient := client.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("send request: %w", err)
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("read response: %w", err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return proxytpes.FileObject{}, &APIError{StatusCode: response.StatusCode, Message: string(responseBody)}
+	}
+	fileObject := proxytpes.FileObject{}
+	if err := json.Unmarshal(responseBody, &fileObject); err != nil {
+		return proxytpes.FileObject{}, fmt.Errorf("decode response: %w", err)
+	}
+	return fileObject, nil
 }
 
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
