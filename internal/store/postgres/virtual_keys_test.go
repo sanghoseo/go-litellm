@@ -49,6 +49,10 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if err != nil || loaded.KeyAlias != alias || len(loaded.Models) != 1 || loaded.Models[0] != models[0] || loaded.RPMLimit == nil || *loaded.RPMLimit != rpmLimit {
 		t.Fatalf("updated record=%#v err=%v", loaded, err)
 	}
+	keys, err := store.ListVirtualKeys(context.Background(), 10)
+	if err != nil || len(keys) != 1 || keys[0].TokenHash != record.TokenHash {
+		t.Fatalf("keys=%#v err=%v", keys, err)
+	}
 	if _, err := store.FindVirtualKey(context.Background(), record.TokenHash); err != nil {
 		t.Fatal(err)
 	}

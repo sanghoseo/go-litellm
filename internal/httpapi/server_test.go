@@ -71,6 +71,13 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	if updated.Code != http.StatusOK || record.KeyAlias != "updated" || len(record.Models) != 1 || record.Models[0] != "other-model" || record.RPMLimit == nil || *record.RPMLimit != 8 {
 		t.Fatalf("update status=%d record=%#v", updated.Code, record)
 	}
+	listRequest := httptest.NewRequest(http.MethodGet, "/key/list", nil)
+	listRequest.Header.Set("Authorization", "Bearer master-key")
+	listed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listed, listRequest)
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), "sk-test-key") || !strings.Contains(listed.Body.String(), `"key_alias":"updated"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
 
 	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
@@ -397,6 +404,13 @@ func (manager *memoryKeyManager) UpdateVirtualKey(_ context.Context, tokenHash s
 	}
 	manager.records[tokenHash] = record
 	return true, nil
+}
+func (manager *memoryKeyManager) ListVirtualKeys(_ context.Context, _ int) ([]auth.ManagedVirtualKey, error) {
+	keys := make([]auth.ManagedVirtualKey, 0, len(manager.records))
+	for _, key := range manager.records {
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 type deploymentCapturingCompleter struct {

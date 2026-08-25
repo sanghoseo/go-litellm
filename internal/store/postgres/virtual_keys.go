@@ -120,3 +120,31 @@ WHERE "token" = $1`, tokenHash, alias, models, expires, rpmLimit)
 	}
 	return result.RowsAffected() > 0, nil
 }
+
+func (store VirtualKeyStore) ListVirtualKeys(ctx context.Context, limit int) ([]auth.ManagedVirtualKey, error) {
+	if store.pool == nil {
+		return nil, auth.ErrInvalidVirtualKey
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := store.pool.Query(ctx, `
+SELECT "token", COALESCE("key_alias", ''), COALESCE("models", ARRAY[]::TEXT[]), "expires", COALESCE("blocked", false), "rpm_limit"
+FROM "LiteLLM_VerificationToken" ORDER BY "created_at" DESC NULLS LAST LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list virtual keys: %w", err)
+	}
+	defer rows.Close()
+	keys := []auth.ManagedVirtualKey{}
+	for rows.Next() {
+		var key auth.ManagedVirtualKey
+		if err := rows.Scan(&key.TokenHash, &key.KeyAlias, &key.Models, &key.ExpiresAt, &key.Blocked, &key.RPMLimit); err != nil {
+			return nil, fmt.Errorf("scan virtual key: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate virtual keys: %w", err)
+	}
+	return keys, nil
+}

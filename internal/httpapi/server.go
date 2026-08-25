@@ -120,6 +120,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /key/block", server.blockKey)
 	mux.HandleFunc("POST /key/unblock", server.unblockKey)
 	mux.HandleFunc("POST /key/update", server.updateKey)
+	mux.HandleFunc("GET /key/list", server.listKeys)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
@@ -452,6 +453,23 @@ func (server Server) updateKey(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated})
+}
+
+func (server Server) listKeys(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	keys, err := server.keyManager.ListVirtualKeys(request.Context(), 100)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not list keys", Type: "server_error", Code: "key_list_failed"})
+		return
+	}
+	response := make([]keyResponse, 0, len(keys))
+	for _, key := range keys {
+		response = append(response, keyResponse{KeyAlias: key.KeyAlias, Models: key.Models, Expires: key.ExpiresAt, Blocked: key.Blocked, RPMLimit: key.RPMLimit})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
