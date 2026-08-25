@@ -1,4 +1,5 @@
 .python-version
+/litellm-proxy
 .venv
 tests/e2e/.fixtures/
 .venv-typecheck
