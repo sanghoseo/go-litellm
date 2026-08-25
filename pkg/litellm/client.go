@@ -42,6 +42,14 @@ func (client Client) Completion(ctx context.Context, request proxytpes.ChatCompl
 	return response, nil
 }
 
+func (client Client) TextCompletion(ctx context.Context, request proxytpes.TextCompletionRequest) (proxytpes.TextCompletionResponse, error) {
+	response := proxytpes.TextCompletionResponse{}
+	if err := client.post(ctx, "completions", request, &response); err != nil {
+		return proxytpes.TextCompletionResponse{}, err
+	}
+	return response, nil
+}
+
 func (client Client) Embedding(ctx context.Context, request proxytpes.EmbeddingRequest) (proxytpes.EmbeddingResponse, error) {
 	response := proxytpes.EmbeddingResponse{}
 	if err := client.post(ctx, "embeddings", request, &response); err != nil {

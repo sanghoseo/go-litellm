@@ -41,6 +41,24 @@ func TestCompletionReturnsAPIError(t *testing.T) {
 	}
 }
 
+func TestTextCompletionUsesOpenAIProxyContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/completions" {
+			t.Fatalf("path=%q", request.URL.Path)
+		}
+		var payload proxytpes.TextCompletionRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil || payload.Model != "gateway-model" || payload.Prompt != "hello" {
+			t.Fatalf("payload=%#v err=%v", payload, err)
+		}
+		_, _ = writer.Write([]byte(`{"id":"cmpl-test","choices":[{"text":"world","index":0,"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+	response, err := (Client{BaseURL: server.URL + "/v1", HTTPClient: server.Client()}).TextCompletion(context.Background(), proxytpes.TextCompletionRequest{Model: "gateway-model", Prompt: "hello"})
+	if err != nil || response.ID != "cmpl-test" || len(response.Choices) != 1 || response.Choices[0].Text != "world" {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+}
+
 func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {
