@@ -262,6 +262,9 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/threads/{threadID}/runs/{runID}/submit_tool_outputs", server.submitThreadRunToolOutputs)
 	mux.HandleFunc("GET /v1/threads/{threadID}/runs/{runID}/steps", server.threadRunSteps)
 	mux.HandleFunc("GET /v1/threads/{threadID}/runs/{runID}/steps/{stepID}", server.threadRunStep)
+	mux.HandleFunc("POST /v1/realtime/client_secrets", server.realtimeClientSecrets)
+	mux.HandleFunc("POST /v1/realtime/calls", server.realtimeCalls)
+	mux.HandleFunc("POST /v1/realtime/transcription_sessions", server.realtimeTranscriptionSessions)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -450,6 +453,15 @@ func (server Server) threadRunSteps(writer http.ResponseWriter, request *http.Re
 }
 func (server Server) threadRunStep(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID")+"/steps/"+request.PathValue("stepID"))
+}
+func (server Server) realtimeClientSecrets(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "realtime/client_secrets")
+}
+func (server Server) realtimeCalls(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "realtime/calls")
+}
+func (server Server) realtimeTranscriptionSessions(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "realtime/transcription_sessions")
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
