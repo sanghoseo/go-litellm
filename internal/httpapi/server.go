@@ -124,6 +124,22 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/batches", server.batches)
 	mux.HandleFunc("GET /v1/batches/{batchID}", server.batch)
 	mux.HandleFunc("POST /v1/batches/{batchID}/cancel", server.cancelBatch)
+	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
+	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
+	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
+	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}", server.vectorStore)
+	mux.HandleFunc("DELETE /v1/vector_stores/{vectorStoreID}", server.vectorStore)
+	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/search", server.vectorStoreSearch)
+	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}/files", server.vectorStoreFiles)
+	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/files", server.vectorStoreFiles)
+	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}/files/{fileID}", server.vectorStoreFile)
+	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/files/{fileID}", server.vectorStoreFile)
+	mux.HandleFunc("DELETE /v1/vector_stores/{vectorStoreID}/files/{fileID}", server.vectorStoreFile)
+	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}/files/{fileID}/content", server.vectorStoreFileContent)
+	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}/file_batches", server.vectorStoreFileBatches)
+	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/file_batches", server.vectorStoreFileBatches)
+	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}/file_batches/{fileBatchID}", server.vectorStoreFileBatch)
+	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/file_batches/{fileBatchID}/cancel", server.cancelVectorStoreFileBatch)
 	handler := server.withRequestID(mux)
 	if server.metrics == nil {
 		return handler
@@ -205,6 +221,42 @@ func (server Server) batch(writer http.ResponseWriter, request *http.Request) {
 
 func (server Server) cancelBatch(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "batches/"+request.PathValue("batchID")+"/cancel")
+}
+
+func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores")
+}
+
+func (server Server) vectorStore(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID"))
+}
+
+func (server Server) vectorStoreSearch(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/search")
+}
+
+func (server Server) vectorStoreFiles(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/files")
+}
+
+func (server Server) vectorStoreFile(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/files/"+request.PathValue("fileID"))
+}
+
+func (server Server) vectorStoreFileContent(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/files/"+request.PathValue("fileID")+"/content")
+}
+
+func (server Server) vectorStoreFileBatches(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/file_batches")
+}
+
+func (server Server) vectorStoreFileBatch(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/file_batches/"+request.PathValue("fileBatchID"))
+}
+
+func (server Server) cancelVectorStoreFileBatch(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "vector_stores/"+request.PathValue("vectorStoreID")+"/file_batches/"+request.PathValue("fileBatchID")+"/cancel")
 }
 
 func (server Server) forwardPassthrough(writer http.ResponseWriter, request *http.Request, endpoint string) {

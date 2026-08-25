@@ -276,6 +276,11 @@ func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 		{http.MethodPost, "/v1/batches/batch-123/cancel", "batches/batch-123/cancel"},
 		{http.MethodPost, "/v1/audio/transcriptions", "audio/transcriptions"},
 		{http.MethodPost, "/v1/audio/translations", "audio/translations"},
+		{http.MethodPost, "/v1/vector_stores", "vector_stores"},
+		{http.MethodPost, "/v1/vector_stores/vs-123/search", "vector_stores/vs-123/search"},
+		{http.MethodPost, "/v1/vector_stores/vs-123/files", "vector_stores/vs-123/files"},
+		{http.MethodGet, "/v1/vector_stores/vs-123/files/file-123/content", "vector_stores/vs-123/files/file-123/content"},
+		{http.MethodPost, "/v1/vector_stores/vs-123/file_batches/batch-123/cancel", "vector_stores/vs-123/file_batches/batch-123/cancel"},
 	} {
 		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(`{"test":true}`))
 		request.Header.Set("Authorization", "Bearer master-key")
