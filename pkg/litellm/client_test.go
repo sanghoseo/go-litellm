@@ -164,6 +164,41 @@ func TestClientFileReadAndDeleteOperations(t *testing.T) {
 	}
 }
 
+func TestClientBatchOperations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.Method + " " + request.URL.Path {
+		case "POST /v1/batches":
+			_, _ = writer.Write([]byte(`{"id":"batch-1","status":"validating"}`))
+		case "GET /v1/batches":
+			_, _ = writer.Write([]byte(`{"object":"list","data":[{"id":"batch-1","status":"in_progress"}]}`))
+		case "GET /v1/batches/batch-1":
+			_, _ = writer.Write([]byte(`{"id":"batch-1","status":"in_progress"}`))
+		case "POST /v1/batches/batch-1/cancel":
+			_, _ = writer.Write([]byte(`{"id":"batch-1","status":"cancelling"}`))
+		default:
+			t.Fatalf("request=%s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := Client{BaseURL: server.URL + "/v1", HTTPClient: server.Client()}
+	created, err := client.CreateBatch(context.Background(), proxytpes.BatchCreateRequest{InputFileID: "file-1", Endpoint: "/v1/chat/completions", CompletionWindow: "24h"})
+	if err != nil || created.ID != "batch-1" {
+		t.Fatalf("created=%#v err=%v", created, err)
+	}
+	listed, err := client.ListBatches(context.Background())
+	if err != nil || len(listed.Data) != 1 || listed.Data[0].Status != "in_progress" {
+		t.Fatalf("listed=%#v err=%v", listed, err)
+	}
+	retrieved, err := client.RetrieveBatch(context.Background(), "batch-1")
+	if err != nil || retrieved.Status != "in_progress" {
+		t.Fatalf("retrieved=%#v err=%v", retrieved, err)
+	}
+	cancelled, err := client.CancelBatch(context.Background(), "batch-1")
+	if err != nil || cancelled.Status != "cancelling" {
+		t.Fatalf("cancelled=%#v err=%v", cancelled, err)
+	}
+}
+
 func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {

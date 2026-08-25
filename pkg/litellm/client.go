@@ -166,6 +166,38 @@ func (client Client) UploadFile(ctx context.Context, filename string, purpose st
 	return fileObject, nil
 }
 
+func (client Client) CreateBatch(ctx context.Context, request proxytpes.BatchCreateRequest) (proxytpes.Batch, error) {
+	response := proxytpes.Batch{}
+	if err := client.post(ctx, "batches", request, &response); err != nil {
+		return proxytpes.Batch{}, err
+	}
+	return response, nil
+}
+
+func (client Client) ListBatches(ctx context.Context) (proxytpes.BatchListResponse, error) {
+	response := proxytpes.BatchListResponse{}
+	if err := client.get(ctx, "batches", &response); err != nil {
+		return proxytpes.BatchListResponse{}, err
+	}
+	return response, nil
+}
+
+func (client Client) RetrieveBatch(ctx context.Context, batchID string) (proxytpes.Batch, error) {
+	response := proxytpes.Batch{}
+	if err := client.get(ctx, "batches/"+url.PathEscape(batchID), &response); err != nil {
+		return proxytpes.Batch{}, err
+	}
+	return response, nil
+}
+
+func (client Client) CancelBatch(ctx context.Context, batchID string) (proxytpes.Batch, error) {
+	response := proxytpes.Batch{}
+	if err := client.post(ctx, "batches/"+url.PathEscape(batchID)+"/cancel", map[string]any{}, &response); err != nil {
+		return proxytpes.Batch{}, err
+	}
+	return response, nil
+}
+
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)
