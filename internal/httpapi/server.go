@@ -15,6 +15,7 @@ import (
 
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/observability"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 	"github.com/BerriAI/litellm/go-proxy/internal/routing"
 	"github.com/BerriAI/litellm/go-proxy/internal/usage"
@@ -49,6 +50,7 @@ type Server struct {
 	requestLimiter  RequestLimiter
 	readinessChecks []ReadinessCheck
 	responseCache   ResponseCache
+	metrics         *observability.Metrics
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -61,7 +63,7 @@ func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter)
 	if len(completers) > 0 {
 		chatCompleter = completers[0]
 	}
-	server := Server{config: proxyConfig, chatCompleter: chatCompleter, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
+	server := Server{config: proxyConfig, chatCompleter: chatCompleter, metrics: observability.NewMetrics(), router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
 	server.setOptionalCompleters(chatCompleter)
 	return server
 }
@@ -75,7 +77,7 @@ func NewServerWithDependencies(proxyConfig config.Config, completer providers.Ch
 }
 
 func NewServerWithRuntime(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder, limiter RequestLimiter, readinessChecks ...ReadinessCheck) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, readinessChecks: readinessChecks, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, readinessChecks: readinessChecks, metrics: observability.NewMetrics(), router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
 	server.setOptionalCompleters(completer)
 	return server
 }
@@ -97,7 +99,11 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
-	return mux
+	if server.metrics == nil {
+		return mux
+	}
+	mux.Handle("GET /metrics", server.metrics.Handler())
+	return server.metrics.Wrap(mux)
 }
 
 func (server Server) responses(writer http.ResponseWriter, request *http.Request) {

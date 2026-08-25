@@ -14,7 +14,7 @@
 | C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 공개 Completion/Embedding/SSE SDK·router retry/alias 이식 |
 | D | `litellm/llms/**`, provider transformations | `internal/providers/` | adapter registry·OpenAI·Azure·Anthropic chat/SSE·Gemini·Bedrock Converse chat 이식 |
 | E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis cache·usage/spend·RPM·readiness 이식 |
-| F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | 대기 |
+| F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | Prometheus HTTP metrics 기본 이식 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/api/`, `internal/providers/` | 대기 |
 | H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | 핵심 운영 DDL 이식 |
 | I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | 루트 config.yaml·timeout/retry/alias 이식 |
