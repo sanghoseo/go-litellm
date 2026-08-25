@@ -96,6 +96,21 @@ func TestClientImageGeneration(t *testing.T) {
 	}
 }
 
+func TestClientSpeechReadsBinaryResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/audio/speech" || request.Header.Get("Authorization") != "Bearer client-key" {
+			t.Fatalf("path=%q auth=%q", request.URL.Path, request.Header.Get("Authorization"))
+		}
+		writer.Header().Set("Content-Type", "audio/mpeg")
+		_, _ = writer.Write([]byte("audio-bytes"))
+	}))
+	defer server.Close()
+	result, err := (Client{BaseURL: server.URL + "/v1", APIKey: "client-key", HTTPClient: server.Client()}).Speech(context.Background(), proxytpes.SpeechRequest{Model: "tts-model", Input: "hello", Voice: "alloy"})
+	if err != nil || string(result) != "audio-bytes" {
+		t.Fatalf("result=%q err=%v", result, err)
+	}
+}
+
 func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {

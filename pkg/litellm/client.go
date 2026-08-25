@@ -79,6 +79,10 @@ func (client Client) ImageGeneration(ctx context.Context, request proxytpes.Imag
 	return response, nil
 }
 
+func (client Client) Speech(ctx context.Context, request proxytpes.SpeechRequest) ([]byte, error) {
+	return client.postBytes(ctx, "audio/speech", request)
+}
+
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)
@@ -272,6 +276,42 @@ func (client Client) post(ctx context.Context, endpoint string, payload any, out
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
+}
+
+func (client Client) postBytes(ctx context.Context, endpoint string, payload any) ([]byte, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode request: %w", err)
+	}
+	endpointURL, err := client.endpointURL(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	if client.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+client.APIKey)
+	}
+	httpClient := client.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, &APIError{StatusCode: response.StatusCode, Message: string(body)}
+	}
+	return body, nil
 }
 
 func (client Client) endpointURL(endpoint string) (string, error) {
