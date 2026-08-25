@@ -117,6 +117,29 @@ type ManagedProject struct {
 	Blocked      bool
 }
 
+type ManagedOrganization struct {
+	OrganizationID    string
+	OrganizationAlias string
+	BudgetID          string
+	Models            []string
+	Blocked           bool
+}
+
+type ManagedOrganizationUpdate struct {
+	OrganizationAlias *string
+	BudgetID          *string
+	Models            *[]string
+	Blocked           *bool
+}
+
+type OrganizationManager interface {
+	CreateOrganization(context.Context, ManagedOrganization) error
+	GetOrganization(context.Context, string) (ManagedOrganization, error)
+	ListOrganizations(context.Context, int) ([]ManagedOrganization, error)
+	UpdateOrganization(context.Context, string, ManagedOrganizationUpdate) (bool, error)
+	DeleteOrganization(context.Context, string) (bool, error)
+}
+
 type ManagedProjectUpdate struct {
 	ProjectAlias *string
 	Description  *string
