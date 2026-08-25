@@ -63,6 +63,14 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	if unblocked.Code != http.StatusOK || manager.records[auth.HashKey("sk-test-key")].Blocked {
 		t.Fatalf("unblock status=%d record=%#v", unblocked.Code, manager.records[auth.HashKey("sk-test-key")])
 	}
+	updateRequest := httptest.NewRequest(http.MethodPost, "/key/update", strings.NewReader(`{"key":"sk-test-key","key_alias":"updated","models":["other-model"],"rpm_limit":8}`))
+	updateRequest.Header.Set("Authorization", "Bearer master-key")
+	updated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(updated, updateRequest)
+	record := manager.records[auth.HashKey("sk-test-key")]
+	if updated.Code != http.StatusOK || record.KeyAlias != "updated" || len(record.Models) != 1 || record.Models[0] != "other-model" || record.RPMLimit == nil || *record.RPMLimit != 8 {
+		t.Fatalf("update status=%d record=%#v", updated.Code, record)
+	}
 
 	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
@@ -367,6 +375,26 @@ func (manager *memoryKeyManager) SetVirtualKeyBlocked(_ context.Context, tokenHa
 		return false, nil
 	}
 	record.Blocked = blocked
+	manager.records[tokenHash] = record
+	return true, nil
+}
+func (manager *memoryKeyManager) UpdateVirtualKey(_ context.Context, tokenHash string, update auth.ManagedVirtualKeyUpdate) (bool, error) {
+	record, found := manager.records[tokenHash]
+	if !found {
+		return false, nil
+	}
+	if update.KeyAlias != nil {
+		record.KeyAlias = *update.KeyAlias
+	}
+	if update.Models != nil {
+		record.Models = *update.Models
+	}
+	if update.ExpiresAt != nil {
+		record.ExpiresAt = update.ExpiresAt
+	}
+	if update.RPMLimit != nil {
+		record.RPMLimit = update.RPMLimit
+	}
 	manager.records[tokenHash] = record
 	return true, nil
 }

@@ -92,3 +92,31 @@ func (store VirtualKeyStore) SetVirtualKeyBlocked(ctx context.Context, tokenHash
 	}
 	return result.RowsAffected() > 0, nil
 }
+
+func (store VirtualKeyStore) UpdateVirtualKey(ctx context.Context, tokenHash string, update auth.ManagedVirtualKeyUpdate) (bool, error) {
+	if store.pool == nil {
+		return false, auth.ErrInvalidVirtualKey
+	}
+	var alias, models, expires, rpmLimit any
+	if update.KeyAlias != nil {
+		alias = *update.KeyAlias
+	}
+	if update.Models != nil {
+		models = *update.Models
+	}
+	if update.ExpiresAt != nil {
+		expires = *update.ExpiresAt
+	}
+	if update.RPMLimit != nil {
+		rpmLimit = *update.RPMLimit
+	}
+	result, err := store.pool.Exec(ctx, `
+UPDATE "LiteLLM_VerificationToken"
+SET "key_alias" = COALESCE($2, "key_alias"), "models" = COALESCE($3, "models"),
+    "expires" = COALESCE($4, "expires"), "rpm_limit" = COALESCE($5, "rpm_limit"), "updated_at" = NOW()
+WHERE "token" = $1`, tokenHash, alias, models, expires, rpmLimit)
+	if err != nil {
+		return false, fmt.Errorf("update virtual key: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}

@@ -28,11 +28,19 @@ type ManagedVirtualKey struct {
 	RPMLimit  *int64
 }
 
+type ManagedVirtualKeyUpdate struct {
+	KeyAlias  *string
+	Models    *[]string
+	ExpiresAt *time.Time
+	RPMLimit  *int64
+}
+
 type VirtualKeyManager interface {
 	CreateVirtualKey(context.Context, ManagedVirtualKey) error
 	GetVirtualKey(context.Context, string) (ManagedVirtualKey, error)
 	DeleteVirtualKey(context.Context, string) (bool, error)
 	SetVirtualKeyBlocked(context.Context, string, bool) (bool, error)
+	UpdateVirtualKey(context.Context, string, ManagedVirtualKeyUpdate) (bool, error)
 }
 
 type VirtualKeyStore interface {

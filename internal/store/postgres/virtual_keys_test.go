@@ -38,10 +38,21 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if err != nil || loaded.KeyAlias != record.KeyAlias || len(loaded.Models) != 1 || loaded.Models[0] != "gateway-model" {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
 	}
+	alias := "updated"
+	models := []string{"other-model"}
+	rpmLimit := int64(10)
+	updated, err := store.UpdateVirtualKey(context.Background(), record.TokenHash, auth.ManagedVirtualKeyUpdate{KeyAlias: &alias, Models: &models, RPMLimit: &rpmLimit})
+	if err != nil || !updated {
+		t.Fatalf("updated=%t err=%v", updated, err)
+	}
+	loaded, err = store.GetVirtualKey(context.Background(), record.TokenHash)
+	if err != nil || loaded.KeyAlias != alias || len(loaded.Models) != 1 || loaded.Models[0] != models[0] || loaded.RPMLimit == nil || *loaded.RPMLimit != rpmLimit {
+		t.Fatalf("updated record=%#v err=%v", loaded, err)
+	}
 	if _, err := store.FindVirtualKey(context.Background(), record.TokenHash); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := store.SetVirtualKeyBlocked(context.Background(), record.TokenHash, true)
+	updated, err = store.SetVirtualKeyBlocked(context.Background(), record.TokenHash, true)
 	if err != nil || !updated {
 		t.Fatalf("updated=%t err=%v", updated, err)
 	}

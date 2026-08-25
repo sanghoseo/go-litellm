@@ -119,6 +119,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /key/delete", server.deleteKey)
 	mux.HandleFunc("POST /key/block", server.blockKey)
 	mux.HandleFunc("POST /key/unblock", server.unblockKey)
+	mux.HandleFunc("POST /key/update", server.updateKey)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
@@ -322,6 +323,14 @@ type keyResponse struct {
 	RPMLimit *int64     `json:"rpm_limit,omitempty"`
 }
 
+type keyUpdateRequest struct {
+	Key      string     `json:"key"`
+	KeyAlias *string    `json:"key_alias"`
+	Models   *[]string  `json:"models"`
+	Expires  *time.Time `json:"expires"`
+	RPMLimit *int64     `json:"rpm_limit"`
+}
+
 func (server Server) generateKey(writer http.ResponseWriter, request *http.Request) {
 	if !server.authorizeAdmin(request) || server.keyManager == nil {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
@@ -417,6 +426,32 @@ func (server Server) setKeyBlocked(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated, "blocked": blocked})
+}
+
+func (server Server) updateKey(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.keyManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input keyUpdateRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.Key == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'key'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.KeyAlias == nil && input.Models == nil && input.Expires == nil && input.RPMLimit == nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "No key attributes to update", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.Expires != nil && !input.Expires.After(time.Now()) {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "expires must be in the future", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.keyManager.UpdateVirtualKey(request.Context(), auth.HashKey(input.Key), auth.ManagedVirtualKeyUpdate{KeyAlias: input.KeyAlias, Models: input.Models, ExpiresAt: input.Expires, RPMLimit: input.RPMLimit})
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update key", Type: "server_error", Code: "key_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated})
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
