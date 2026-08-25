@@ -15,6 +15,7 @@ type VirtualKey struct {
 	TokenHash     string
 	Models        []string
 	UserID        string
+	UserModels    []string
 	TeamID        string
 	TeamModels    []string
 	ProjectID     string
@@ -141,6 +142,9 @@ func (validator Validator) Validate(ctx context.Context, rawKey string, model st
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	if model != "" && len(virtualKey.Models) > 0 && !contains(virtualKey.Models, model) {
+		return VirtualKey{}, ErrInvalidVirtualKey
+	}
+	if model != "" && len(virtualKey.UserModels) > 0 && !contains(virtualKey.UserModels, model) {
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	if model != "" && len(virtualKey.TeamModels) > 0 && !contains(virtualKey.TeamModels, model) {
