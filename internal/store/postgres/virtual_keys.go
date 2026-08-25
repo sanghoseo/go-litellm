@@ -26,12 +26,12 @@ func (store VirtualKeyStore) FindVirtualKey(ctx context.Context, tokenHash strin
 
 	key := auth.VirtualKey{}
 	err := store.pool.QueryRow(ctx, `
-SELECT k."token", COALESCE(k."models", ARRAY[]::TEXT[]), COALESCE(k."user_id", ''), COALESCE(k."team_id", ''), COALESCE(k."project_id", ''), k."expires", COALESCE(k."blocked", false) OR COALESCE(u."blocked", false) OR COALESCE(t."blocked", false) OR COALESCE(p."blocked", false), k."rpm_limit"
+SELECT k."token", COALESCE(k."models", ARRAY[]::TEXT[]), COALESCE(k."user_id", ''), COALESCE(k."team_id", ''), COALESCE(k."project_id", ''), COALESCE(p."models", ARRAY[]::TEXT[]), k."expires", COALESCE(k."blocked", false) OR COALESCE(u."blocked", false) OR COALESCE(t."blocked", false) OR COALESCE(p."blocked", false), k."rpm_limit"
 FROM "LiteLLM_VerificationToken" k
 LEFT JOIN "LiteLLM_UserTable" u ON u."user_id" = k."user_id"
 LEFT JOIN "LiteLLM_TeamTable" t ON t."team_id" = k."team_id"
 LEFT JOIN "LiteLLM_ProjectTable" p ON p."project_id" = k."project_id"
-WHERE k."token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.UserID, &key.TeamID, &key.ProjectID, &key.ExpiresAt, &key.Blocked, &key.RPMLimit)
+WHERE k."token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.UserID, &key.TeamID, &key.ProjectID, &key.ProjectModels, &key.ExpiresAt, &key.Blocked, &key.RPMLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.VirtualKey{}, auth.ErrInvalidVirtualKey
 	}

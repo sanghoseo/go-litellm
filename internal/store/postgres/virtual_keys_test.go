@@ -35,16 +35,19 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectStore := NewProjectStore(pool)
-	if err := projectStore.CreateProject(context.Background(), auth.ManagedProject{ProjectID: "project-key-integration", TeamID: "team-key-integration"}); err != nil {
+	if err := projectStore.CreateProject(context.Background(), auth.ManagedProject{ProjectID: "project-key-integration", TeamID: "team-key-integration", Models: []string{"gateway-model"}}); err != nil {
 		t.Fatal(err)
 	}
-	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model"}, TeamID: "team-key-integration", ProjectID: "project-key-integration", ExpiresAt: &expires}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model", "other-model"}, TeamID: "team-key-integration", ProjectID: "project-key-integration", ExpiresAt: &expires}
 	if err := store.CreateVirtualKey(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.GetVirtualKey(context.Background(), record.TokenHash)
-	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || len(loaded.Models) != 1 || loaded.Models[0] != "gateway-model" {
+	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || len(loaded.Models) != 2 {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
+	}
+	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "other-model"); err == nil {
+		t.Fatal("key accepted a model disallowed by its project")
 	}
 	alias := "updated"
 	models := []string{"other-model"}
