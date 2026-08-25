@@ -245,6 +245,21 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/assistants/{assistantID}", server.assistant)
 	mux.HandleFunc("POST /v1/assistants/{assistantID}", server.assistant)
 	mux.HandleFunc("DELETE /v1/assistants/{assistantID}", server.assistant)
+	mux.HandleFunc("GET /v1/threads", server.threads)
+	mux.HandleFunc("POST /v1/threads", server.threads)
+	mux.HandleFunc("GET /v1/threads/{threadID}", server.thread)
+	mux.HandleFunc("POST /v1/threads/{threadID}", server.thread)
+	mux.HandleFunc("DELETE /v1/threads/{threadID}", server.thread)
+	mux.HandleFunc("GET /v1/threads/{threadID}/messages", server.threadMessages)
+	mux.HandleFunc("POST /v1/threads/{threadID}/messages", server.threadMessages)
+	mux.HandleFunc("GET /v1/threads/{threadID}/messages/{messageID}", server.threadMessage)
+	mux.HandleFunc("POST /v1/threads/{threadID}/messages/{messageID}", server.threadMessage)
+	mux.HandleFunc("GET /v1/threads/{threadID}/runs", server.threadRuns)
+	mux.HandleFunc("POST /v1/threads/{threadID}/runs", server.threadRuns)
+	mux.HandleFunc("GET /v1/threads/{threadID}/runs/{runID}", server.threadRun)
+	mux.HandleFunc("POST /v1/threads/{threadID}/runs/{runID}/cancel", server.cancelThreadRun)
+	mux.HandleFunc("POST /v1/threads/{threadID}/runs/{runID}/submit_tool_outputs", server.submitThreadRunToolOutputs)
+	mux.HandleFunc("GET /v1/threads/{threadID}/runs/{runID}/steps", server.threadRunSteps)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -400,6 +415,33 @@ func (server Server) assistants(writer http.ResponseWriter, request *http.Reques
 }
 func (server Server) assistant(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "assistants/"+request.PathValue("assistantID"))
+}
+func (server Server) threads(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads")
+}
+func (server Server) thread(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID"))
+}
+func (server Server) threadMessages(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/messages")
+}
+func (server Server) threadMessage(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/messages/"+request.PathValue("messageID"))
+}
+func (server Server) threadRuns(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs")
+}
+func (server Server) threadRun(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID"))
+}
+func (server Server) cancelThreadRun(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID")+"/cancel")
+}
+func (server Server) submitThreadRunToolOutputs(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID")+"/submit_tool_outputs")
+}
+func (server Server) threadRunSteps(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "threads/"+request.PathValue("threadID")+"/runs/"+request.PathValue("runID")+"/steps")
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
