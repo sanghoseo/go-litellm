@@ -82,6 +82,20 @@ func TestClientModerationAndRerank(t *testing.T) {
 	}
 }
 
+func TestClientImageGeneration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/images/generations" {
+			t.Fatalf("path=%q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{"created":1,"data":[{"url":"https://image.example/test"}]}`))
+	}))
+	defer server.Close()
+	response, err := (Client{BaseURL: server.URL + "/v1", HTTPClient: server.Client()}).ImageGeneration(context.Background(), proxytpes.ImageGenerationRequest{Model: "image-model", Prompt: "a lighthouse"})
+	if err != nil || len(response.Data) != 1 || response.Data[0].URL != "https://image.example/test" {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+}
+
 func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {

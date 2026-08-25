@@ -71,6 +71,14 @@ func (client Client) Rerank(ctx context.Context, request proxytpes.RerankRequest
 	return response, nil
 }
 
+func (client Client) ImageGeneration(ctx context.Context, request proxytpes.ImageGenerationRequest) (proxytpes.ImageGenerationResponse, error) {
+	response := proxytpes.ImageGenerationResponse{}
+	if err := client.post(ctx, "images/generations", request, &response); err != nil {
+		return proxytpes.ImageGenerationResponse{}, err
+	}
+	return response, nil
+}
+
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)
