@@ -115,6 +115,13 @@ func TestTeamManagementLifecycle(t *testing.T) {
 	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"team_alias":"Engineering"`) {
 		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
 	}
+	update := httptest.NewRequest(http.MethodPost, "/team/update", strings.NewReader(`{"team_id":"team-test","team_alias":"Updated"}`))
+	update.Header.Set("Authorization", "Bearer master-key")
+	updated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || manager.teams["team-test"].TeamAlias != "Updated" {
+		t.Fatalf("update status=%d team=%#v", updated.Code, manager.teams["team-test"])
+	}
 	block := httptest.NewRequest(http.MethodPost, "/team/block", strings.NewReader(`{"team_id":"team-test"}`))
 	block.Header.Set("Authorization", "Bearer master-key")
 	blocked := httptest.NewRecorder()
@@ -707,6 +714,29 @@ func (manager *memoryTeamManager) GetTeam(_ context.Context, teamID string) (aut
 		return auth.ManagedTeam{}, auth.ErrInvalidVirtualKey
 	}
 	return team, nil
+}
+func (manager *memoryTeamManager) UpdateTeam(_ context.Context, teamID string, update auth.ManagedTeamUpdate) (bool, error) {
+	team, found := manager.teams[teamID]
+	if !found {
+		return false, nil
+	}
+	if update.TeamAlias != nil {
+		team.TeamAlias = *update.TeamAlias
+	}
+	if update.Admins != nil {
+		team.Admins = *update.Admins
+	}
+	if update.Members != nil {
+		team.Members = *update.Members
+	}
+	if update.Models != nil {
+		team.Models = *update.Models
+	}
+	if update.Blocked != nil {
+		team.Blocked = *update.Blocked
+	}
+	manager.teams[teamID] = team
+	return true, nil
 }
 func (manager *memoryTeamManager) ListTeams(_ context.Context, _ int) ([]auth.ManagedTeam, error) {
 	teams := make([]auth.ManagedTeam, 0, len(manager.teams))

@@ -36,6 +36,16 @@ func TestTeamStoreLifecycle(t *testing.T) {
 	if err != nil || loaded.TeamAlias != team.TeamAlias || len(loaded.Models) != 1 || loaded.Admins == nil || loaded.Members == nil {
 		t.Fatalf("team=%#v err=%v", loaded, err)
 	}
+	alias := "Updated"
+	members := []string{"member"}
+	updated, err := store.UpdateTeam(context.Background(), team.TeamID, auth.ManagedTeamUpdate{TeamAlias: &alias, Members: &members})
+	if err != nil || !updated {
+		t.Fatalf("updated=%t err=%v", updated, err)
+	}
+	loaded, err = store.GetTeam(context.Background(), team.TeamID)
+	if err != nil || loaded.TeamAlias != alias || len(loaded.Members) != 1 || loaded.Members[0] != members[0] {
+		t.Fatalf("updated team=%#v err=%v", loaded, err)
+	}
 	teams, err := store.ListTeams(context.Background(), 10)
 	if err != nil || len(teams) != 1 || teams[0].TeamID != team.TeamID {
 		t.Fatalf("teams=%#v err=%v", teams, err)

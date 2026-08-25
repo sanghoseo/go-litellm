@@ -58,6 +58,33 @@ FROM "LiteLLM_TeamTable" WHERE "team_id" = $1`, teamID).Scan(&team.TeamID, &team
 	return team, nil
 }
 
+func (store TeamStore) UpdateTeam(ctx context.Context, teamID string, update auth.ManagedTeamUpdate) (bool, error) {
+	if store.pool == nil {
+		return false, auth.ErrInvalidVirtualKey
+	}
+	var alias, admins, members, models, blocked any
+	if update.TeamAlias != nil {
+		alias = *update.TeamAlias
+	}
+	if update.Admins != nil {
+		admins = nonNilStringSlice(*update.Admins)
+	}
+	if update.Members != nil {
+		members = nonNilStringSlice(*update.Members)
+	}
+	if update.Models != nil {
+		models = nonNilStringSlice(*update.Models)
+	}
+	if update.Blocked != nil {
+		blocked = *update.Blocked
+	}
+	result, err := store.pool.Exec(ctx, "UPDATE \"LiteLLM_TeamTable\" SET \"team_alias\" = COALESCE($2, \"team_alias\"), \"admins\" = COALESCE($3, \"admins\"), \"members\" = COALESCE($4, \"members\"), \"models\" = COALESCE($5, \"models\"), \"blocked\" = COALESCE($6, \"blocked\"), \"updated_at\" = NOW() WHERE \"team_id\" = $1", teamID, alias, admins, members, models, blocked)
+	if err != nil {
+		return false, fmt.Errorf("update team: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
 func (store TeamStore) ListTeams(ctx context.Context, limit int) ([]auth.ManagedTeam, error) {
 	if store.pool == nil {
 		return nil, auth.ErrInvalidVirtualKey

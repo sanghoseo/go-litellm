@@ -64,9 +64,18 @@ type ManagedTeam struct {
 	Blocked   bool
 }
 
+type ManagedTeamUpdate struct {
+	TeamAlias *string
+	Admins    *[]string
+	Members   *[]string
+	Models    *[]string
+	Blocked   *bool
+}
+
 type TeamManager interface {
 	CreateTeam(context.Context, ManagedTeam) error
 	GetTeam(context.Context, string) (ManagedTeam, error)
+	UpdateTeam(context.Context, string, ManagedTeamUpdate) (bool, error)
 	ListTeams(context.Context, int) ([]ManagedTeam, error)
 	SetTeamBlocked(context.Context, string, bool) (bool, error)
 	DeleteTeam(context.Context, string) (bool, error)
