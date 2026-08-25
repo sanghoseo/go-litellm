@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
@@ -127,6 +128,20 @@ func TestChatCompletionsRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsAppliesVirtualKeyRateLimit(t *testing.T) {
+	limit := int64(1)
+	server := NewServerWithRuntime(
+		config.Config{Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}}, stubChatCompleter{}, limitedVirtualKeyValidator{limit: limit}, nil, denyingLimiter{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusTooManyRequests)
+	}
+}
+
 func TestChatCompletionsRoundRobinsConfiguredDeployments(t *testing.T) {
 	server := NewServer(
 		config.Config{MasterKey: "master-key", Models: []config.Model{
@@ -163,6 +178,18 @@ type recordingUsageRecorder struct{ records []usage.Record }
 func (recorder *recordingUsageRecorder) Insert(_ context.Context, record usage.Record) error {
 	recorder.records = append(recorder.records, record)
 	return nil
+}
+
+type limitedVirtualKeyValidator struct{ limit int64 }
+
+func (validator limitedVirtualKeyValidator) Validate(_ context.Context, _ string, _ string) (auth.VirtualKey, error) {
+	return auth.VirtualKey{TokenHash: "hash", RPMLimit: &validator.limit}, nil
+}
+
+type denyingLimiter struct{}
+
+func (denyingLimiter) Allow(context.Context, string, int64, time.Duration) (bool, error) {
+	return false, nil
 }
 
 func (completer deploymentCapturingCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {

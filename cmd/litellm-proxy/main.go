@@ -64,6 +64,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	var database *pgxpool.Pool
 	var keyValidator httpapi.VirtualKeyValidator
 	var usageRecorder usage.Recorder
+	var requestLimiter httpapi.RequestLimiter
 	if proxyConfig.DatabaseURL != "" {
 		database, err = pgxpool.New(context.Background(), proxyConfig.DatabaseURL)
 		if err != nil {
@@ -85,6 +86,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		if err := redisClient.Ping(context.Background()); err != nil {
 			return fmt.Errorf("ping Redis: %w", err)
 		}
+		requestLimiter = redisClient
 	}
 
 	providerRegistry := providers.NewRegistry(map[string]providers.Client{
@@ -96,7 +98,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	})
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithDependencies(proxyConfig, providerRegistry, keyValidator, usageRecorder).Handler(),
+		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)

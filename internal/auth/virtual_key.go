@@ -16,6 +16,7 @@ type VirtualKey struct {
 	Models    []string
 	ExpiresAt *time.Time
 	Blocked   bool
+	RPMLimit  *int64
 }
 
 type VirtualKeyStore interface {

@@ -24,14 +24,19 @@ type VirtualKeyValidator interface {
 	Validate(context.Context, string, string) (auth.VirtualKey, error)
 }
 
+type RequestLimiter interface {
+	Allow(context.Context, string, int64, time.Duration) (bool, error)
+}
+
 type Server struct {
-	config        config.Config
-	chatCompleter providers.ChatCompleter
-	responseMaker providers.ResponseCreator
-	embedder      providers.Embedder
-	keyValidator  VirtualKeyValidator
-	router        *routing.Router
-	usageRecorder usage.Recorder
+	config         config.Config
+	chatCompleter  providers.ChatCompleter
+	responseMaker  providers.ResponseCreator
+	embedder       providers.Embedder
+	keyValidator   VirtualKeyValidator
+	router         *routing.Router
+	usageRecorder  usage.Recorder
+	requestLimiter RequestLimiter
 }
 
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
@@ -49,7 +54,11 @@ func NewServerWithVirtualKeyValidator(proxyConfig config.Config, completer provi
 }
 
 func NewServerWithDependencies(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
+	return NewServerWithRuntime(proxyConfig, completer, validator, recorder, nil)
+}
+
+func NewServerWithRuntime(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder, limiter RequestLimiter) Server {
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
 	server.setOptionalCompleters(completer)
 	return server
 }
@@ -108,9 +117,13 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
 		return
 	}
-	_, authorized := server.authorize(request, modelName)
+	virtualKey, authorized := server.authorize(request, modelName)
 	if !authorized {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	if !server.allowedByRateLimit(request.Context(), virtualKey, modelName) {
+		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
 	upstream, err := completer(request.Context(), deployment, body)
@@ -122,6 +135,14 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 	copyResponseHeaders(writer.Header(), upstream.Header)
 	writer.WriteHeader(upstream.StatusCode)
 	_ = copyResponse(writer, upstream.Body)
+}
+
+func (server Server) allowedByRateLimit(ctx context.Context, virtualKey auth.VirtualKey, modelName string) bool {
+	if server.requestLimiter == nil || virtualKey.TokenHash == "" || virtualKey.RPMLimit == nil {
+		return true
+	}
+	allowed, err := server.requestLimiter.Allow(ctx, "litellm:rpm:"+virtualKey.TokenHash+":"+modelName, *virtualKey.RPMLimit, time.Minute)
+	return err == nil && allowed
 }
 
 func (server Server) providerUnavailable(writer http.ResponseWriter, message string) {
@@ -152,6 +173,10 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	virtualKey, authorized := server.authorize(request, modelName)
 	if !authorized {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	if !server.allowedByRateLimit(request.Context(), virtualKey, modelName) {
+		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
 

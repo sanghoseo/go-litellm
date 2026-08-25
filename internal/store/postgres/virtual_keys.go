@@ -26,9 +26,9 @@ func (store VirtualKeyStore) FindVirtualKey(ctx context.Context, tokenHash strin
 
 	key := auth.VirtualKey{}
 	err := store.pool.QueryRow(ctx, `
-SELECT "token", COALESCE("models", ARRAY[]::TEXT[]), "expires", COALESCE("blocked", false)
+SELECT "token", COALESCE("models", ARRAY[]::TEXT[]), "expires", COALESCE("blocked", false), "rpm_limit"
 FROM "LiteLLM_VerificationToken"
-WHERE "token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.ExpiresAt, &key.Blocked)
+WHERE "token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.ExpiresAt, &key.Blocked, &key.RPMLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.VirtualKey{}, auth.ErrInvalidVirtualKey
 	}
