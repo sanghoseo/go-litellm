@@ -81,6 +81,12 @@ var coreSchemaStatements = map[string]string{
 "metadata" JSONB NOT NULL DEFAULT '{}'::JSONB, "spend" DOUBLE PRECISION NOT NULL DEFAULT 0, "max_budget" DOUBLE PRECISION,
 "max_parallel_requests" INTEGER, "tpm_limit" BIGINT, "rpm_limit" BIGINT, "blocked" BOOLEAN NOT NULL DEFAULT FALSE,
 "created_at" TIMESTAMP(3) DEFAULT NOW(), "updated_at" TIMESTAMP(3) DEFAULT NOW())`,
+	"organization table": `CREATE TABLE IF NOT EXISTS "LiteLLM_OrganizationTable" (
+"organization_id" TEXT PRIMARY KEY, "organization_alias" TEXT NOT NULL DEFAULT '', "budget_id" TEXT,
+"models" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[], "metadata" JSONB NOT NULL DEFAULT '{}'::JSONB,
+"spend" DOUBLE PRECISION NOT NULL DEFAULT 0, "blocked" BOOLEAN NOT NULL DEFAULT FALSE,
+"created_at" TIMESTAMP(3) NOT NULL DEFAULT NOW(), "created_by" TEXT NOT NULL DEFAULT '',
+"updated_at" TIMESTAMP(3) NOT NULL DEFAULT NOW(), "updated_by" TEXT NOT NULL DEFAULT '' )`,
 	"team table": `CREATE TABLE IF NOT EXISTS "LiteLLM_TeamTable" (
 "team_id" TEXT PRIMARY KEY, "team_alias" TEXT, "organization_id" TEXT, "admins" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
 "members" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[], "models" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
@@ -117,6 +123,7 @@ var coreSchemaStatements = map[string]string{
 var coreSchemaOrder = []string{
 	"budget table",
 	"user table",
+	"organization table",
 	"team table",
 	"project table",
 	"verification token table",

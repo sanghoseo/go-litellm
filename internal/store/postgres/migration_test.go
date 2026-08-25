@@ -26,7 +26,7 @@ func TestEnsureCoreSchema(t *testing.T) {
 	if err := EnsureCoreSchema(context.Background(), pool); err != nil {
 		t.Fatalf("EnsureCoreSchema() error = %v", err)
 	}
-	for _, table := range []string{"LiteLLM_VerificationToken", "LiteLLM_UserTable", "LiteLLM_TeamTable", "LiteLLM_SpendLogs"} {
+	for _, table := range []string{"LiteLLM_VerificationToken", "LiteLLM_UserTable", "LiteLLM_OrganizationTable", "LiteLLM_TeamTable", "LiteLLM_SpendLogs"} {
 		var found bool
 		if err := pool.QueryRow(context.Background(), "SELECT to_regclass($1) IS NOT NULL", `public."`+table+`"`).Scan(&found); err != nil || !found {
 			t.Fatalf("table %s was not created: found=%t err=%v", table, found, err)
