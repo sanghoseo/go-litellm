@@ -11,6 +11,39 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 )
 
+func TestCreateEmbeddingConvertsGeminiResponse(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls++
+		if request.URL.Path != "/v1beta/models/text-embedding-004:embedContent" || request.URL.Query().Get("key") != "gemini-key" {
+			t.Fatalf("unexpected Gemini embedding request: path=%q query=%q", request.URL.Path, request.URL.RawQuery)
+		}
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if string(body) != `{"content":{"parts":[{"text":"hello"}]}}` && string(body) != `{"content":{"parts":[{"text":"world"}]}}` {
+			t.Fatalf("body = %s", body)
+		}
+		_, _ = writer.Write([]byte(`{"embedding":{"values":[0.1,0.2]}}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).CreateEmbedding(context.Background(), config.Model{Model: "gemini/text-embedding-004", APIKey: "gemini-key", APIBase: upstream.URL + "/v1beta"}, []byte(`{"model":"gateway","input":["hello","world"]}`))
+	if err != nil {
+		t.Fatalf("CreateEmbedding() error = %v", err)
+	}
+	defer response.Body.Close()
+	converted, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read converted body: %v", err)
+	}
+	const expected = `{"object":"list","data":[{"object":"embedding","embedding":[0.1,0.2],"index":0},{"object":"embedding","embedding":[0.1,0.2],"index":1}],"model":"text-embedding-004","usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`
+	if string(converted) != expected || calls != 2 {
+		t.Fatalf("converted = %s, calls = %d", converted, calls)
+	}
+}
+
 func TestChatCompletionConvertsGeminiRequestAndResponse(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1beta/models/gemini-test:generateContent" || request.URL.Query().Get("key") != "gemini-key" {
