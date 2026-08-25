@@ -1,238 +1,211 @@
-# LiteLLM OSS/core Python/Rust Go 전환 PRD
+# LiteLLM OSS 단일 Go Proxy PRD
 
-## 1. 문서 목적
+## 1. 목적
 
-이 문서는 LiteLLM의 OSS/core Python과 Rust 실행 코드·테스트를 Go로 재개발하고, `ui/` 디렉토리의 기존 Next.js 대시보드는 유지하기 위한 제품 범위, 우선순위, 호환성 기준 및 요구사항을 정의한다. Enterprise 기능은 현재 Go 전환 범위에서 제외하며, Enterprise Python 코드와 런타임은 별도 승인된 후속 단계까지 유지한다
+LiteLLM의 독립 Proxy 서버에 필요한 OSS 기능을 Go로 재구현한다. 결과물은 Python SDK를 제공하지 않고, OpenAI 호환 HTTP API를 제공하는 단일 Go 바이너리 `litellm-proxy`다
 
-기능 누락 방지를 위한 구현 순서는 고정한다. 먼저 기존 Python/Rust의 기능 파일과 테스트를 1:1로 대응하는 Go parity 구현으로 완성한다. 그 뒤 별도 변경으로만 Go에 맞는 package 구조와 중복 제거를 리팩터링한다. parity 구현과 구조 리팩터링을 같은 변경에서 수행하지 않는다
+개발과 배포에서 Python, uv 및 Python 런타임 의존성을 제거해 빌드, 로컬 실행, 배포와 운영을 단순화한다
 
-## 2. 현황 및 근거
+## 2. 범위
 
-2026-08-20 저장소 조사 기준:
+### 포함
 
-- 추적된 Python 파일은 5,277개, Rust 파일은 110개다. Enterprise 하위에는 Python 파일 149개가 있다
-- Python Proxy에는 약 757개의 HTTP 라우트 선언이 있으며, 관리, 인증, 비용, 관측성, OpenAI 호환 API 등 넓은 표면적을 가진다
-- `litellm/llms/`에는 100개가 넘는 공급자 어댑터가 있다
-- Rust 워크스페이스는 `core`, `ai-gateway`, `python-bridge` 크레이트로 분리되어 있고, messages, responses, audio transcription, OCR, realtime 및 일부 OpenAI, Anthropic, Bedrock, Azure AI, Vertex AI, Mistral 경로를 단계적으로 구현 중이다. 구성, 재시도, 라우팅 정책, 로깅, 비용 추적, 고객 플러그인은 여전히 Python이 담당한다. Rust 런타임도 최종적으로 Go 구현으로 대체 대상이다
-- Enterprise 코드는 상업 라이선스 경계 안에 있으며, 감사 로그, 키 및 프로젝트 관리, 내부 사용자 관리, SSO 확장, 관리형 파일·벡터 스토어, 알림 콜백 등의 기능이 존재한다
-- 현 저장소의 Go 코드는 Terraform provider와 예제 수준으로, 실행 가능한 Go Gateway 모듈은 없다
-- 주 대시보드는 `ui/litellm-dashboard/`에 있다. Next.js 16.2, React 19.2, TypeScript 5.9, Tailwind CSS 4, shadcn/ui, TanStack Query/Table, OpenAPI 타입 생성, Vitest로 개발된다. `enterprise/enterprise_ui/`는 현재 주 대시보드 구현체가 아니다
+- OpenAI 호환 API: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`
+- Server-Sent Events 기반 스트리밍, 요청 취소, deadline 전파와 OpenAI 호환 오류 응답
+- master key 및 virtual key 인증, 기본 역할 기반 접근 제어, 허용 모델 검증
+- 모델 별칭, provider deployment 선택, timeout, retry, fallback과 load balancing
+- 1차 provider: OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Google Gemini 또는 Vertex AI
+- PostgreSQL 기반 사용자, 팀, 프로젝트, virtual key, 사용량, 비용 및 예산 데이터
+- Redis 기반 cache, rate limit, 분산 lock과 짧은 수명의 조정 상태
+- health/readiness, 구조화 로그, Prometheus metrics, OpenTelemetry trace propagation
+- 기존 `config.yaml` 및 `.env`의 P0 설정 키 호환
+- Go multi-stage Docker 이미지와 단일 `litellm-proxy` 바이너리
 
-결론적으로 본 프로젝트는 단순 언어 변환이 아니다. 데이터 계약, OpenAI 호환 API, 공급자별 변환, 인증·권한, 비용 정산 및 운영 기능을 보존하는 플랫폼 마이그레이션이다
+### 제외
 
-## 3. 제품 비전
+- Python SDK 및 Python SDK 호환 계층
+- `ui/` 및 관리 대시보드의 빌드·배포·재작성
+- `enterprise/`의 코드, API, 라이선스 기능과 Go 이식
+- SSO, SCIM, Enterprise 감사 로그, 관리형 파일·벡터 스토어와 Enterprise 전용 guardrail
+- P1 API: audio, image generation, rerank, batches, realtime/WebSocket, MCP, A2A
+- 모든 LiteLLM provider의 즉시 이식
 
-Go 기반 LiteLLM OSS/core Gateway를 제공한다. Go 서비스와 Go SDK는 Enterprise 경계를 제외한 현재 Python SDK·Proxy·관리 API·CLI·백그라운드 작업·테스트·Rust core/bridge/gateway의 동작을 대체한다. `ui/`의 기존 Next.js 대시보드는 유지하며, OSS/core 화면은 Go API 계약을 통해 계속 제공한다. Enterprise 화면과 API는 기존 Python Enterprise backend가 계속 제공한다
+## 3. 제품 원칙
 
-## 4. 목표와 비목표
+- Proxy 자체는 하나의 Go 바이너리로 실행한다
+- 운영 환경의 PostgreSQL과 Redis는 외부 서비스로 유지한다
+- 로컬 전환 검증에서만 `--local-dev`가 embedded PostgreSQL과 miniredis를 자동 기동한다
+- PostgreSQL은 영속 데이터의 source of truth이며 Redis는 cache와 조정 상태만 보관한다
+- 설정에 지원하지 않는 Python 전용 필드가 있으면 시작 시 명확하게 실패하거나 경고한다. 무시해서 동작 의미가 달라져서는 안 된다
+- Enterprise 코드는 라이선스 경계를 유지하기 위해 빌드, 바이너리 및 런타임에서 제외한다
+- 원본 Python 파일 구조를 기계적으로 복제하지 않는다. 공개 계약과 단일 책임을 기준으로 idiomatic Go 패키지로 재구성한다
 
-### 목표
-
-1. Enterprise 경계를 제외한 Python/Rust 실행 코드와 테스트를 Go 구현으로 대체한다
-2. 기존 Python Proxy와 Rust 서비스를 병행 실행하면서 요청 단위로 안전하게 Go로 전환한다
-3. 모든 지원 endpoint와 공급자에 대해 요청·응답·스트리밍·오류 의미론의 호환성을 보장한다
-4. 현재 Next.js 대시보드와 그 TypeScript UI 테스트를 유지하고, 대시보드가 소비하는 OSS/core API·인증·정적 asset 배포 계약을 보장한다
-5. 운영 데이터의 PostgreSQL 및 Redis 계약을 명시하고, 기존 배포·Terraform·관리 UI와 연동한다
-
-### 비목표
-
-- 대시보드를 Go 또는 다른 프런트엔드 기술로 재작성하지 않는다. 현재 Next.js/React/TypeScript 대시보드를 유지한다
-- Enterprise 기능의 Go 재개발, Enterprise Python 코드 제거, Enterprise 테스트의 Go 전환은 현재 범위에 포함하지 않는다
-- 현재 Rust 코드의 기계적 포팅을 목표로 하지 않는다. 검증된 동작과 공개 계약을 기준으로 Go 설계를 새로 만든다
-- 최종 OSS/core 상태에서 `ui/`와 Enterprise 경계 밖의 Python 또는 Rust 실행 소스를 요청 처리, SDK, CLI, worker, provider adapter, plugin 또는 테스트에 요구하지 않는다
-- YAML, JSON, SQL, HCL, Dockerfile, Helm chart, Markdown 및 `ui/`의 TypeScript/TSX는 Go 전환 대상이 아니다. 기존 OSS/core Python/Rust의 동작은 Go로 재구현하거나 generated artifact·중복물·폐기 기능은 근거를 남겨 삭제한다
-- Enterprise 라이선스 코드를 오픈소스 경로로 복사하거나 상업 라이선스 경계를 변경하지 않는다
-
-## 5. 사용자와 핵심 시나리오
+## 4. 사용자 시나리오
 
 | 사용자 | 시나리오 | 기대 결과 |
 | --- | --- | --- |
-| 애플리케이션 개발자 | OpenAI SDK의 base URL만 Gateway로 변경 | `/v1/chat/completions`, `/v1/responses`, embeddings를 동일한 인증·스트리밍 방식으로 호출 |
-| 플랫폼 운영자 | 모델 장애 또는 비용 조건에 따라 여러 배포를 운영 | 모델 별칭, fallback, 재시도, rate limit, circuit breaking 및 사용량 기록이 일관되게 동작 |
-| 조직 관리자 | 조직·프로젝트·팀·사용자 및 가상 키를 관리 | 권한 범위와 모델·예산 제한이 모든 요청 경로에서 강제 |
-| 보안 관리자 | SSO/SCIM으로 인력을 관리하고 정책 위반을 조사 | 사용자·그룹 동기화, 감사 가능한 변경 이력, 정책 위반 및 키 사용 기록 확보 |
-| 재무 관리자 | 팀과 프로젝트의 LLM 지출을 제어 | 실시간 또는 정의된 지연 한도 내 비용 집계, 한도 차단 및 알림 |
+| 애플리케이션 개발자 | OpenAI SDK의 base URL을 Proxy로 변경 | OpenAI 형식 요청과 스트리밍 응답이 동작 |
+| 플랫폼 운영자 | 하나의 모델 이름에 여러 provider deployment를 구성 | 정책에 맞는 deployment를 선택하고 장애 시 fallback |
+| 조직 관리자 | virtual key를 발급하고 모델·예산을 제한 | 모든 요청에 key scope, model allowlist와 limit가 적용 |
+| 개발자 | `--local-dev`로 Proxy를 실행 | PostgreSQL과 Redis 설치 없이 로컬에서 Python 대비 검증 |
 
-## 6. 제품 범위
-
-### 6.1 최종 전환 범위
-
-최종 전환 범위는 Enterprise 경계를 제외한 Python과 Rust 실행 코드다. `litellm/`, `litellm-rust/`, `backend/`, `gateway/`, `litellm-proxy-extras/`, `scripts/`, `cookbook/`, `tests/`에 있는 OSS/core Python/Rust 코드는 Go로 재구현하거나 삭제한다. `enterprise/`, Enterprise 전용 `litellm/` 경로, `tests/enterprise/`, `tests/test_litellm/enterprise/`는 현재 제외한다. 다음 항목을 포함한다:
-
-- Python SDK의 동기/비동기 public API, typed model, configuration, retry, callback, caching, router, secret manager, provider transform 및 모든 지원 endpoint
-- Proxy의 OSS/core 공개·관리 API, 인증, routing, cache, spend tracking, DB transaction queue, health, background job, webhook 및 observability 경로
-- Rust `core`, `ai-gateway`, `python-bridge`의 route, provider, routing, realtime 및 bridge 기능
-- Python/Rust unit·integration·E2E·load test, local mock server, CLI, migration/maintenance script. UI 전용 Playwright/TypeScript 테스트는 대시보드 유지 범위에 속한다
-
-대시보드와 UI 전용 테스트는 유지 대상이다. Terraform provider는 이미 Go로 구현되어 있어 새 Go API와의 호환성 검증·필요 시 수정 대상이다. Markdown, Helm, Terraform HCL, SQL migration, Docker/CI 설정은 실행 언어 전환 대상이 아닌 배포·운영 artifact로 유지한다
-
-### 6.2 파일 1:1 parity 전환 규칙
-
-1:1은 파일 이름이나 구현 문법을 기계적으로 복사한다는 뜻이 아니다. Enterprise 경계와 `ui/` 밖 기존 OSS/core Python/Rust 실행 파일의 단일 책임, 공개 심볼, 입력·출력·오류·부작용, 그리고 연결된 테스트를 하나의 Go source/test 대응 항목으로 보존한다는 뜻이다
-
-- 단계 0에서 각 원본 파일에 `source_path`, `source_language`, `responsibility`, `public_contract`, `go_parity_path`, `go_test_path`, `status`, `owner`를 가진 migration manifest를 만든다
-- 실행 동작이 있는 원본 파일은 하나의 Go parity 파일에 대응한다. 빈 package marker, generated artifact, 중복 test helper, 폐기 기능은 포팅 대신 삭제할 수 있으나 근거와 대체 fixture 또는 삭제 승인 상태를 manifest에 남긴다
-- 원본 test의 assertion은 Go test로 1:1 대응한다. golden request/response는 JSON/YAML fixture로 분리해 언어 종속 helper를 제거한다
-- 원본 파일의 동작을 여러 Go 파일로 쪼개거나, 여러 원본 파일을 하나로 합치는 작업은 parity 단계에서 금지한다. 필요한 경우에도 parity 파일이 조합을 호출하도록 하며, 구조 통합은 리팩터링 단계로 미룬다
-- parity Go 파일은 원본과 추적 가능한 경로 및 migration ID를 갖는다. 최종 Go 구조는 이 ID와 test를 유지한 채 별도 refactor commit에서 변경한다
-- 새 기능은 parity 전환 중에 추가하지 않는다. 보안상 긴급한 수정만 별도 migration ID와 regression test를 추가할 수 있다
-
-### 6.3 Gateway 데이터면, P0
-
-- OpenAI 호환 API: health/readiness, models, chat completions, responses, embeddings
-- SSE 스트리밍, 요청 취소, context deadline 전파, 표준 오류 응답
-- 공급자 어댑터 1차: OpenAI/Azure OpenAI, Anthropic, AWS Bedrock, Google Vertex AI/Gemini
-- 인증: master key, 가상 키, JWT 기반 세션 토큰. 키의 조직·프로젝트·팀·사용자 범위 및 허용 모델 검증
-- 라우팅: 모델 별칭, 가중치 분배, 우선순위, fallback, timeout, 재시도, circuit breaker
-- 사용량 및 비용: 토큰 사용량 추출, 가격표 기반 비용 계산, 요청 로그, 일별·월별 집계
-- Redis 기반 rate limit, 캐시 및 분산 조정. PostgreSQL 영속화
-- 구조화 로그, Prometheus metrics, OpenTelemetry trace propagation 및 감사 이벤트 발행
-
-### 6.4 Gateway 확장, P1
-
-- Anthropic Messages 호환 API, audio transcription, image generation, rerank, batches, realtime/WebSocket
-- 공급자 어댑터 2차: Mistral, Cohere, Groq, Ollama/vLLM 및 OpenAI-compatible endpoint
-- 요청/응답 Guardrail 훅과 정책 상속
-- semantic cache, prompt 관리, 파일·벡터 스토어 프록시, MCP/A2A는 각각 독립 RFC 승인 뒤 추가
-- Python/Rust에서 아직 포팅되지 않은 경로는 전환 기간에만 compatibility proxy 모드로 위임한다. 이 위임은 관측 가능하고 설정으로 켜야 하며, 최종 출시 게이트 전에 source와 runtime을 함께 제거한다
-
-### 6.5 Enterprise 제어면, 현재 제외
-
-다음 기능은 현재 Go parity manifest에서 `excluded-enterprise` 상태로 기록한다. 기존 Python Enterprise backend와 테스트를 변경하거나 제거하지 않는다. Enterprise 전환은 OSS/core Go parity 완료와 별도 제품·라이선스 승인을 전제로 하는 후속 PRD에서 다룬다
-
-- 테넌시: organization, project, team, user, service account, virtual key의 명확한 소유 관계
-- RBAC: system admin, organization admin, project admin, team admin, developer, auditor, viewer 역할과 최소 권한 API
-- SSO: OIDC 우선 지원. SAML은 설계가 고정된 뒤 P1로 추가. JIT provisioning과 claim-to-role mapping 지원
-- SCIM 2.0: Users/Groups CRUD, pagination, filter, PATCH, deprovisioning, idempotency 및 기존 team/user 모델 매핑
-- 예산: 조직·프로젝트·팀·사용자·키 단위 한도, 모델 허용 목록, 기간, soft/hard threshold, 동시성 및 rate limit
-- 감사: 인증, 권한 거부, 관리 변경, 키 수명주기, 정책 변경, 모델 라우팅 결정, 비용 한도 조치 기록
-- 정책 엔진: 대상(조직·프로젝트·팀·키·모델), 상속, 우선순위, guardrail 및 라우팅 규칙 결합
-
-### 6.6 신규 Enterprise 기능, 현재 제외
-
-- 정책-as-code: Git 또는 API로 versioned policy bundle을 검증·승인·배포·롤백하고 적용 버전을 요청 및 감사 이벤트에 기록
-- 불변 감사 내보내기: 고객 소유 object storage 또는 SIEM으로 순서 보장된 서명 이벤트 배치를 내보내고 체크포인트로 누락과 변조를 탐지
-- 예산 자동 조치: soft threshold 알림, hard threshold 차단, fallback model 전환, 제한 완화 승인 흐름. 조치마다 정책·주체·근거를 감사 로그에 남김
-
-## 7. 대시보드 유지 및 API 계약
-
-대시보드 소스는 `ui/litellm-dashboard/`이며, Next.js static export(`output: "export"`)로 빌드된다. Go 전환은 이 프로젝트를 변경 대상이 아닌 호환성 소비자로 취급한다. Enterprise 화면은 기존 Python Enterprise backend를 계속 호출하며, Go 전환 범위에서는 그 API를 재구현하지 않는다
-
-- Next.js, React, TypeScript, Tailwind CSS, shadcn/ui 및 현재 대시보드의 빌드·테스트 체인을 유지한다
-- 대시보드가 호출하는 API는 `src/lib/http/schema.d.ts`의 OpenAPI 타입과 일치해야 한다. Go API 변경 뒤에는 `npm run gen:api`로 타입을 재생성하고 대시보드 타입 검사·테스트를 통과해야 한다
-- same-origin과 `NEXT_PUBLIC_BASE_URL` 기반 split-origin 배포, `/ui/` 경로, 정적 asset prefix, 로그인·SSO redirect 및 httpOnly cookie 보안 모델을 유지한다
-- UI 기능별 API parity를 별도 matrix로 관리한다. API 키, 사용자·팀·조직·프로젝트, 모델·라우팅, 사용량·비용, logs/audit, guardrail, policy, SCIM/SSO, MCP/vector store 화면이 포함 대상이다
-- 기존 API의 Python-특화 오류 문자열에 UI가 의존하는 부분은 Go의 구조화된 오류 계약으로 대체하되, 대시보드 변경과 backend 변경을 같은 compatibility release에 포함한다
-
-## 8. 호환성 계약
-
-Go Gateway는 다음 계약을 Python Proxy 기준으로 유지한다
-
-- 공개 엔드포인트, HTTP method, 인증 header, OpenAI 형식의 request/response 및 SSE event 순서
-- 상태 코드와 오류 형식. 호환 불가능한 개선은 versioned endpoint 또는 명시적 migration flag로 제공
-- virtual key, user, team, project, budget 및 spend log의 식별자와 소유 관계
-- 기존 YAML 구성의 P0 영역. Go 전용 설정은 별도 namespace 아래 두고, 지원하지 않는 필드는 시작 시 오류 또는 명확한 경고를 낸다
-- Helm chart, Docker 환경변수, Terraform provider가 필요한 관리 API 계약
-
-호환성 기준은 문서 비교가 아니라 contract test로 판정한다. 동일한 입력을 Python 기준 인스턴스와 Go 후보 인스턴스에 보내어 상태 코드, 필수 header, JSON 의미론, SSE 이벤트, 비용·사용량 기록, 감사 이벤트를 비교한다
-
-## 9. 아키텍처 원칙
+## 5. 아키텍처
 
 ```text
-Client / OpenAI SDK / Admin UI
-            |
-      Go Gateway API
-            |
- AuthN/AuthZ -> Policy -> Rate/Budget -> Router -> Provider Adapter
-            |                                |             |
- PostgreSQL + Redis <--- Usage/Audit/Events --+        LLM providers
-            |
- Legacy Enterprise backend boundary
+Client / OpenAI SDK
+        |
+  Go Proxy HTTP Server
+        |
+Auth -> Rate/Budget -> Router -> Provider Adapter
+ |                         |             |
+ PostgreSQL + Redis <- Usage/Cost -------+
 ```
 
-- 단일 Go module에서 시작하되, `cmd/gateway`, `cmd/worker`, `cmd/sdk-codegen`과 `internal/` 아래 transport, auth, policy, routing, providers, usage, audit, admin, jobs, callbacks, secrets 모듈을 분리한다
-- provider adapter는 공통 인터페이스와 강타입 request/response 모델을 사용한다. HTTP handler가 공급자 변환이나 영속화를 직접 수행하지 않는다
-- 인증, 권한, 예산, 정책 판정은 provider 호출 전에 완료된다. 비용 확정과 감사 기록은 요청 종료 시 실패 격리된 outbox를 통해 처리한다
-- PostgreSQL은 source of truth, Redis는 TTL 상태, rate limit, cache 및 저지연 카운터 용도로만 사용한다
-- 관리 변경과 사용량 업데이트는 idempotency key와 transactional outbox를 사용한다
-- Enterprise 전용 코드는 명확한 라이선스 패키지 및 빌드 배포 경계에 둔다. OSS 바이너리는 Enterprise 권한 우회를 포함하지 않는다
-- 기존 Python SDK는 Go SDK로 대체한다. Go SDK는 별도 Go module로 배포하되, Go Gateway의 domain type과 transport contract를 공유한다. Python SDK 호환 계층이나 generated Python client는 최종 제품 범위에 포함하지 않는다
+권장 패키지 구조는 다음과 같다
 
-## 10. 마이그레이션 단계 및 완료 기준
+```text
+cmd/litellm-proxy/       바이너리 진입점
+internal/config/         config.yaml, .env, validation
+internal/httpapi/        HTTP handler, middleware, SSE, OpenAI 오류
+internal/auth/           master key, virtual key, RBAC
+internal/routing/        model registry, retry, fallback, balancing
+internal/providers/      provider adapter와 request/response 변환
+internal/store/postgres/ PostgreSQL repository와 migration
+internal/store/redis/    cache, rate limit, lock
+internal/usage/          token usage, price, spend, budget
+internal/observability/  log, metrics, trace
+internal/localdev/       embedded PostgreSQL과 miniredis lifecycle
+```
 
-| 단계 | 제공 범위 | 완료 기준 |
-| --- | --- | --- |
-| 0. 기준선 | Python/Rust source inventory, migration manifest, API/데이터 모델 매핑, language-neutral golden fixture, 성능·오류 기준 수집 | OSS/core `.py`, `.rs` 파일이 Go parity 포팅, 삭제, 생성물 중 하나로 분류되고 source-to-Go 1:1 mapping·owner·test가 기록. Enterprise 항목은 `excluded-enterprise`로 기록 |
-| 1. parity 기반 | 원본 경로를 추적하는 Go module, config, HTTP/SSE, PostgreSQL, Redis, telemetry, auth parity 구현 | health와 가상 키 인증, trace 및 구조화 로그가 원본 계약과 Go test에서 동작 |
-| 2. P0 parity | chat/responses/embeddings, 1차 provider, routing, usage/spend의 파일 1:1 Go 구현 | 원본 test assertion 대응, contract suite 통과 및 shadow traffic 비교에서 허용 불일치 없음 |
-| 3. OSS/core 확장 parity | P1 endpoint, 나머지 provider, Go SDK, OSS/core callbacks/plugins, CLI, background job, Rust-only path 및 Python/Rust test/tooling | OSS/core manifest의 모든 실행 항목이 Go parity 구현·Go test·owner·삭제 상태를 가지며 원본 기능 누락이 없음 |
-| 5. 대시보드 통합 | Go OpenAPI, UI API matrix, UI E2E 및 static asset 배포 | 현재 대시보드의 모든 화면이 Go parity API와 동작하고, generated API type 및 UI E2E 통과 |
-| 6. Go 구조 리팩터링 | parity 구현의 package 통합, 중복 제거, idiomatic Go API 정리 | refactor 전후 모든 Go contract/E2E/load test가 통과하고 public contract change가 없거나 versioned migration이 제공 |
-| 7. OSS/core 최종 전환 | OSS/core Python/Rust 제거 | OSS/core production traffic과 test/tooling이 리팩터링된 Go만 사용하며 원본 OSS/core runtime, bridge, compatibility proxy와 source 제거. Enterprise Python backend는 유지 |
+## 6. 데이터와 로컬 개발
 
-## 11. 기능 요구사항과 수용 기준
+기존 `schema.prisma`의 PostgreSQL 스키마와 식별자 계약을 기준선으로 삼는다. Go 구현은 PostgreSQL에 직접 접근하며 Python Prisma client를 사용하지 않는다. Go migration 도구 또는 검증된 SQL migration 산출물을 채택한다
 
-### Gateway
+`--local-dev` 모드는 다음을 수행한다
 
-- P0 endpoint는 인증된 요청에 대해 OpenAI SDK와 호환되는 JSON 및 SSE를 반환해야 한다
-- 스트리밍 요청이 취소되면 provider 요청도 취소하고, 완료된 사용량만 한 번 기록해야 한다
-- 라우팅은 구성된 모델 정책을 넘는 provider나 credential을 선택해서는 안 된다
-- 재시도는 idempotent하거나 명시적으로 재시도 가능한 요청만 수행하며, 각 시도와 최종 결과를 추적 가능해야 한다
-- 비용·예산 판정은 tenant scope를 혼합하지 않아야 하며, hard budget을 초과하는 경쟁 요청은 원자적으로 거부되어야 한다
+1. `embedded-postgres`로 실제 PostgreSQL child process를 시작한다
+2. 임시 data directory에 migration을 적용한다
+3. `miniredis`를 같은 Go 프로세스에서 시작한다
+4. 자동으로 구성한 `DATABASE_URL`과 Redis 주소로 Proxy를 실행한다
+5. 종료 시 child process와 임시 리소스를 정리한다
 
-### Enterprise, 현재 제외
+embedded PostgreSQL은 실제 단일 파일 내장 DB가 아니다. 플랫폼별 PostgreSQL 실행 파일을 내려받거나 릴리스 아티팩트와 함께 제공해야 한다. 이 모드는 개발·전환 검증 전용이며 운영 모드가 아니다
 
-Enterprise 기능 요구사항과 검증은 기존 Python Enterprise backend의 책임으로 유지한다. 이 PRD의 Go acceptance gate에는 Enterprise 기능 parity를 넣지 않는다
+## 7. 기술 선택
 
-### 전체 언어 전환 및 대시보드
+| 관심사 | 선택 |
+| --- | --- |
+| HTTP/SSE | Go 표준 `net/http` 중심 구현 |
+| PostgreSQL | `pgx/v5` |
+| Redis | `go-redis/v9` |
+| 로컬 PostgreSQL | `fergusstrange/embedded-postgres` |
+| 로컬 Redis | `alicebob/miniredis/v2` |
+| 설정 | YAML decoder + 환경변수 overlay |
+| 인증 | 검증된 Go JWT 라이브러리와 bcrypt 또는 argon2 기반 key hash |
+| 관측성 | Prometheus 공식 Go client와 OpenTelemetry Go SDK |
 
-- Python/Rust inventory의 각 실행 항목은 Go 구현 또는 삭제 근거, contract test, 부하 테스트 결과, 문서 및 원본 제거 변경을 연결해야 한다
-- Go parity 단계의 각 항목은 원본 파일과 1:1 migration manifest mapping 및 대응 Go test가 있어야 한다. Go package 통합·파일 분할·중복 제거는 parity 완료 뒤의 별도 refactor change에서만 할 수 있다
-- Go OSS/core production image와 Go OSS/core test/tool image에는 Python runtime, Rust binary/toolchain, PyO3 bridge, Python compatibility proxy가 포함되지 않아야 한다. Enterprise Python image와 `ui/` 대시보드 build/serve image는 현재 유지한다
-- 대시보드는 생성된 OpenAPI 타입과 Go server의 spec이 일치해야 하며, 지원 화면의 E2E test가 Go deployment를 대상으로 통과해야 한다
-- 대시보드가 저장하는 인증 정보는 현재 보안 지침대로 `localStorage`에 저장하지 않아야 한다
+모든 외부 Go 의존성은 `go.mod`에 명시적 버전으로 고정하고, 도입 시 라이선스와 유지보수 상태를 확인한다
 
-## 12. 비기능 요구사항
+## 8. API와 호환성 계약
 
-- 보안: TLS 종료 뒤에도 trusted proxy 경계를 검증하고, secret은 로그·감사 payload·오류에 기록하지 않는다. 키는 해시 또는 KMS envelope encryption으로 저장한다
-- 신뢰성: provider, Redis, exporter 실패가 인증·정책·감사 데이터 정합성을 우회하지 않아야 한다. 명시된 fail-open/fail-closed 정책을 endpoint별로 둔다
-- 성능: P0 기준선은 기존 Python Proxy와 같은 인프라와 공급자 조건에서 P95 Gateway overhead와 오류율을 비교해, 사전에 합의한 SLO를 충족해야 한다. 정확한 수치는 단계 0 측정 후 결정한다
-- 관측성: request ID, tenant ID의 비식별 참조, model, route, provider, retry, latency, token/cost outcome을 correlation 가능하게 기록한다
-- 운영성: config validation, readiness, graceful shutdown, migration 상태 확인, metric/trace/log export, tenant별 canary와 rollback을 제공한다
+P0 endpoint는 기존 Python Proxy를 기준으로 다음을 유지한다
 
-## 13. 데이터 및 API 전환 원칙
+- URL, HTTP method, Authorization header와 OpenAI request/response 필드
+- JSON error shape, 상태 코드 및 SSE event 순서
+- 취소 시 upstream request 취소와 한 번만 기록되는 사용량
+- model alias, virtual key의 tenant scope와 model allowlist
+- `config.yaml`의 P0 설정 의미
 
-- 기존 Prisma/PostgreSQL 스키마를 조사해 변경 전에는 schema compatibility matrix와 migration plan을 만든다
-- Go는 기존 테이블을 직접 쓰더라도 ORM 모델을 진실의 원천으로 만들지 않는다. 쿼리와 transaction 경계를 명시적으로 소유한다
-- 사용량, spend log, audit event는 append-only 우선이며 집계 테이블은 재생성 가능해야 한다
-- API 삭제·필드 의미 변경은 금지한다. 새 필드는 additive하게 도입하고 client capability를 확인할 수 없는 변경은 versioning한다
+호환성은 문서 검토가 아니라 contract test로 판정한다. 동일 fixture를 Python 기준 Proxy와 Go Proxy에 전송해 상태 코드, 필수 header, JSON 의미, SSE events, DB usage/cost 기록을 비교한다
 
-## 14. 테스트 및 출시 게이트
+## 9. 구현 단계
 
-- API contract: 현재 OSS/core Python/Rust 기준과 Go 후보 간 language-neutral fixture 및 실제 provider sandbox/계정 기반 비교. 기존 OSS/core Python/Rust test는 Go test로 재작성한다
-- 통합: PostgreSQL, Redis, 1차 provider별 성공·오류·timeout·streaming 검증
-- 보안: OSS/core key rotation/revocation, forged JWT, rate/budget concurrency, routing/policy bypass 검증
-- 회귀: 현재 Next.js 관리 대시보드와 Terraform provider의 전체 지원 흐름을 Go API에 대한 E2E로 검증
-- 성능·복구: sustained load, provider outage, Redis 재시작, DB failover, exporter backlog, graceful shutdown
-- 출시: shadow -> 내부 canary -> 선택 tenant canary -> 기본 전환 순서로 진행하며, 오류율·지연·비용 차이·권한 거부율에 자동 rollback threshold를 설정
+### 단계 0. 기준선과 migration manifest
 
-## 15. 리스크와 결정 필요 사항
+- P0 endpoint, config key, 환경변수, PostgreSQL table, Redis command를 인벤토리화한다
+- Python 요청/응답과 오류 fixture를 language-neutral JSON 또는 YAML로 추출한다
+- 각 Python 구현 항목에 Go package, test 및 상태를 연결하는 migration manifest를 만든다
+- P0 provider와 provider별 지원 API를 확정한다
+
+완료 기준: P0 동작, 데이터 및 설정 계약이 테스트 가능한 명세로 고정된다
+
+### 단계 1. Go 기반과 로컬 개발
+
+- `go.mod`와 `cmd/litellm-proxy`를 만든다
+- 설정 validation, HTTP middleware, health/readiness, graceful shutdown을 구현한다
+- `--local-dev`, embedded PostgreSQL, miniredis, migration lifecycle을 구현한다
+- PostgreSQL·Redis repository interface와 테스트 fixture를 만든다
+
+완료 기준: 외부 서비스 설치 없이 `litellm-proxy --local-dev --config config.yaml`이 기동한다
+
+### 단계 2. 인증과 데이터 운영
+
+- master key와 virtual key authentication을 구현한다
+- 사용자, 팀, 프로젝트, key scope와 model allowlist를 구현한다
+- usage, cost, budget 및 rate limit의 최소 데이터 흐름을 구현한다
+
+완료 기준: 유효하지 않은 key와 권한 밖 모델 요청이 일관되게 거부되고, 허용 요청은 사용량을 기록한다
+
+### 단계 3. 핵심 Proxy와 provider
+
+- models, chat completions, responses, embeddings endpoint를 구현한다
+- SSE streaming, cancellation, timeout과 OpenAI 오류 변환을 구현한다
+- OpenAI provider부터 adapter를 완성하고 나머지 P0 provider를 순차적으로 추가한다
+- 모델 registry, retry, fallback과 load balancing을 구현한다
+
+완료 기준: OpenAI SDK가 Go Proxy를 대상으로 P0 endpoint와 streaming을 사용할 수 있다
+
+### 단계 4. 운영 준비
+
+- Redis cache, rate limit, lock 및 budget concurrency를 강화한다
+- metrics, traces, logs와 운영 관리 API를 구현한다
+- Dockerfile과 entrypoint를 Go runtime으로 교체한다
+- Python/uv/Prisma Python runtime을 Proxy 이미지에서 제거한다
+
+완료 기준: 외부 PostgreSQL·Redis를 사용한 컨테이너 배포가 Python 없이 동작한다
+
+### 단계 5. 검증과 전환
+
+- Python Proxy와 Go Proxy의 fixture 및 실제 provider contract test를 실행한다
+- 실제 PostgreSQL·Redis 통합 테스트와 부하·장애 테스트를 실행한다
+- shadow traffic, canary, rollback 지표를 정의한다
+- P0 호환성이 검증된 Python Proxy 실행 경로를 제거한다
+
+완료 기준: 대상 P0 트래픽이 Go 바이너리만으로 운영되고 Python Proxy runtime이 필요 없다
+
+## 10. 테스트 전략
+
+- Unit: routing, auth, config, pricing, error mapping과 provider 변환
+- Contract: Python 기준 Proxy와 Go Proxy에 동일 fixture 전송
+- Local integration: `--local-dev`의 embedded PostgreSQL + miniredis
+- Full integration: 실제 PostgreSQL과 Redis를 대상으로 migration, lock, cache, rate limit, concurrency 검증
+- Provider integration: 실제 provider 계정으로 success, streaming, timeout, retry 및 error path 검증
+- Load and resilience: provider outage, Redis reconnect, PostgreSQL restart, graceful shutdown 검증
+
+miniredis는 테스트용 구현이므로 Cluster, Sentinel, Lua scripting 또는 영속성에 의존하는 흐름은 실제 Redis 통합 테스트에서 별도로 검증한다
+
+## 11. 수용 기준
+
+- Go 바이너리는 Python 런타임 없이 P0 Proxy를 실행한다
+- OpenAI SDK가 P0 endpoint와 streaming을 호출할 수 있다
+- virtual key, model allowlist, rate limit과 budget이 provider 호출 전에 적용된다
+- usage와 cost가 PostgreSQL에 정확히 한 번 기록된다
+- local-dev 모드는 PostgreSQL과 Redis의 사전 설치 없이 동작한다
+- 운영 Docker 이미지는 Go binary와 필요한 migration artifact만 포함한다
+- Enterprise와 UI 의존성은 Go Proxy 이미지와 바이너리에 포함되지 않는다
+- Python 기준 contract suite와 Go 후보가 합의된 P0 호환성 기준을 충족한다
+
+## 12. 리스크와 대응
 
 | 리스크 | 대응 |
 | --- | --- |
-| Python/Rust 전환의 범위와 누락 | inventory를 source path, 언어, public contract, Go owner, test, 삭제 상태까지 추적하고, 미분류 실행 경로는 완료로 선언하지 않음 |
-| Rust 작업과 Go 전환의 중복 투자 | Rust를 동작 및 fixture의 참고 구현으로 분류하고, 새 Gateway 기능의 단일 소유자를 Go로 지정 |
-| Python callback/plugin 및 test/tool 의존 | Go native callback/plugin contract, Go CLI, Go test 또는 외부 webhook/event contract로 재구현하고, compatibility proxy는 임시 전환 수단으로만 사용 |
-| 비용/예산의 경쟁 조건 | DB 트랜잭션 또는 원자 카운터, idempotency, reconciliation job 및 보수적 hard-limit 정책 적용 |
-| Enterprise와 Go Gateway의 경계 혼합 | Enterprise API를 legacy backend로 명시적으로 라우팅하고, Go manifest에서 `excluded-enterprise` 상태를 유지. Enterprise Go 전환은 별도 승인 전에는 시작하지 않음 |
-| 기존 DB 의미론 불명확 | 코드 포팅 전 schema 및 운영 데이터 샘플 기반의 compatibility matrix를 승인 |
+| 기존 Proxy 표면적이 넓음 | P0 contract를 먼저 고정하고 P1을 명시적으로 제외 |
+| PostgreSQL 스키마의 Python Prisma 결합 | schema compatibility matrix와 명시적 Go SQL migration 작성 |
+| miniredis와 실제 Redis의 차이 | CI에서 실제 Redis 통합 테스트를 필수화 |
+| embedded PostgreSQL의 플랫폼 binary 필요 | local-dev 전용으로 한정하고 플랫폼별 release artifact 제공 |
+| provider별 응답 차이 | provider별 golden fixture와 실제 provider integration test 유지 |
+| Enterprise 라이선스 경계 | `enterprise/`를 import하거나 이식하지 않고 별도 후속 승인 범위로 유지 |
 
-착수 전 제품 책임자가 결정해야 할 사항은 다음과 같다: Go 전환의 최초 운영 대상이 self-hosted Gateway만인지 hosted control plane까지인지, P0에서 반드시 지원할 OSS/core 공급자와 endpoint, 기존 Python SDK의 지원 종료·Go SDK 도입 정책, Enterprise API를 legacy backend로 유지하는 배포·라우팅 경계, compatibility proxy 종료 기한, 그리고 단계 0에서 확정할 성능·가용성 SLO다
+## 13. 후속 범위
 
-## 16. 산출물
-
-- Go Gateway/worker/SDK, container/Helm 배포물 및 운영 runbook
-- API·설정·DB compatibility matrix와 자동 contract test suite
-- [Python 코드의 Go 재개발 범위](./PYTHON_TO_GO_SCOPE.md), Python 기능군·Go package·test/tooling 제거 기준
-- [Rust 구현 범위와 Go 전환 설계](./RUST_TO_GO_SCOPE.md), Rust code inventory 및 제거 상태표
-- Python·Rust 경로별 Go 재개발/삭제 상태표, 제거 계획 및 Go SDK 도입 guide
+P0 출시 뒤 별도 PRD와 승인으로 P1 API, 추가 provider, 관리 UI 연동, MCP/A2A 및 Enterprise 이식 여부를 평가한다
