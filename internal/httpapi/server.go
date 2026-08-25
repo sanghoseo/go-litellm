@@ -168,6 +168,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /project/new", server.createProject)
 	mux.HandleFunc("GET /project/info", server.projectInfo)
 	mux.HandleFunc("GET /project/list", server.listProjects)
+	mux.HandleFunc("POST /project/update", server.updateProject)
 	mux.HandleFunc("POST /project/block", server.blockProject)
 	mux.HandleFunc("POST /project/unblock", server.unblockProject)
 	mux.HandleFunc("POST /project/delete", server.deleteProject)
@@ -862,6 +863,16 @@ type projectResponse struct {
 	Blocked      bool     `json:"blocked"`
 }
 
+type projectUpdateRequest struct {
+	ProjectID    string    `json:"project_id"`
+	ProjectAlias *string   `json:"project_alias"`
+	Description  *string   `json:"description"`
+	TeamID       *string   `json:"team_id"`
+	BudgetID     *string   `json:"budget_id"`
+	Models       *[]string `json:"models"`
+	Blocked      *bool     `json:"blocked"`
+}
+
 func (server Server) createProject(writer http.ResponseWriter, request *http.Request) {
 	if !server.authorizeAdmin(request) || server.projectManager == nil {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
@@ -925,6 +936,33 @@ func (server Server) listProjects(writer http.ResponseWriter, request *http.Requ
 		response = append(response, projectResponseFrom(project))
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+}
+
+func (server Server) updateProject(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.projectManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input projectUpdateRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.ProjectID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'project_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.projectManager.UpdateProject(request.Context(), input.ProjectID, auth.ManagedProjectUpdate{ProjectAlias: input.ProjectAlias, Description: input.Description, TeamID: input.TeamID, BudgetID: input.BudgetID, Models: input.Models, Blocked: input.Blocked})
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update project", Type: "server_error", Code: "project_update_failed"})
+		return
+	}
+	if !updated {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Project not found", Type: "invalid_request_error", Code: "project_not_found"})
+		return
+	}
+	project, err := server.projectManager.GetProject(request.Context(), input.ProjectID)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not read updated project", Type: "server_error", Code: "project_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, projectResponseFrom(project))
 }
 
 func (server Server) blockProject(writer http.ResponseWriter, request *http.Request) {

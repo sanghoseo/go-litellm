@@ -36,6 +36,16 @@ func TestProjectStoreLifecycle(t *testing.T) {
 	if err != nil || loaded.ProjectAlias != project.ProjectAlias || len(loaded.Models) != 1 {
 		t.Fatalf("project=%#v err=%v", loaded, err)
 	}
+	alias := "Updated"
+	models := []string{"other-model"}
+	updated, err := store.UpdateProject(context.Background(), project.ProjectID, auth.ManagedProjectUpdate{ProjectAlias: &alias, Models: &models})
+	if err != nil || !updated {
+		t.Fatalf("updated=%t err=%v", updated, err)
+	}
+	loaded, err = store.GetProject(context.Background(), project.ProjectID)
+	if err != nil || loaded.ProjectAlias != alias || len(loaded.Models) != 1 || loaded.Models[0] != models[0] {
+		t.Fatalf("updated project=%#v err=%v", loaded, err)
+	}
 	projects, err := store.ListProjects(context.Background(), 10)
 	if err != nil || len(projects) != 1 || projects[0].ProjectID != project.ProjectID {
 		t.Fatalf("projects=%#v err=%v", projects, err)

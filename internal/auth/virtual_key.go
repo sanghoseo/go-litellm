@@ -95,9 +95,19 @@ type ManagedProject struct {
 	Blocked      bool
 }
 
+type ManagedProjectUpdate struct {
+	ProjectAlias *string
+	Description  *string
+	TeamID       *string
+	BudgetID     *string
+	Models       *[]string
+	Blocked      *bool
+}
+
 type ProjectManager interface {
 	CreateProject(context.Context, ManagedProject) error
 	GetProject(context.Context, string) (ManagedProject, error)
+	UpdateProject(context.Context, string, ManagedProjectUpdate) (bool, error)
 	ListProjects(context.Context, int) ([]ManagedProject, error)
 	SetProjectBlocked(context.Context, string, bool) (bool, error)
 	DeleteProject(context.Context, string) (bool, error)

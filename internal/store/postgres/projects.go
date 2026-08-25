@@ -40,6 +40,36 @@ func (store ProjectStore) GetProject(ctx context.Context, projectID string) (aut
 	return project, nil
 }
 
+func (store ProjectStore) UpdateProject(ctx context.Context, projectID string, update auth.ManagedProjectUpdate) (bool, error) {
+	if store.pool == nil {
+		return false, auth.ErrInvalidVirtualKey
+	}
+	var alias, description, teamID, budgetID, models, blocked any
+	if update.ProjectAlias != nil {
+		alias = *update.ProjectAlias
+	}
+	if update.Description != nil {
+		description = *update.Description
+	}
+	if update.TeamID != nil {
+		teamID = *update.TeamID
+	}
+	if update.BudgetID != nil {
+		budgetID = *update.BudgetID
+	}
+	if update.Models != nil {
+		models = nonNilStringSlice(*update.Models)
+	}
+	if update.Blocked != nil {
+		blocked = *update.Blocked
+	}
+	result, err := store.pool.Exec(ctx, "UPDATE \"LiteLLM_ProjectTable\" SET \"project_alias\" = COALESCE($2, \"project_alias\"), \"description\" = COALESCE($3, \"description\"), \"team_id\" = COALESCE($4, \"team_id\"), \"budget_id\" = COALESCE($5, \"budget_id\"), \"models\" = COALESCE($6, \"models\"), \"blocked\" = COALESCE($7, \"blocked\"), \"updated_at\" = NOW() WHERE \"project_id\" = $1", projectID, alias, description, teamID, budgetID, models, blocked)
+	if err != nil {
+		return false, fmt.Errorf("update project: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
 func (store ProjectStore) ListProjects(ctx context.Context, limit int) ([]auth.ManagedProject, error) {
 	if store.pool == nil {
 		return nil, auth.ErrInvalidVirtualKey
