@@ -46,12 +46,12 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	if err := organizationStore.CreateOrganization(context.Background(), auth.ManagedOrganization{OrganizationID: "organization-key-integration", Models: []string{"gateway-model"}}); err != nil {
 		t.Fatal(err)
 	}
-	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model", "team-model", "project-model", "user-restricted-model", "organization-restricted-model"}, UserID: "user-key-integration", TeamID: "team-key-integration", ProjectID: "project-key-integration", OrganizationID: "organization-key-integration", ExpiresAt: &expires}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey("sk-integration-test"), KeyAlias: "integration", Models: []string{"gateway-model", "team-model", "project-model", "user-restricted-model", "organization-restricted-model"}, UserID: "user-key-integration", TeamID: "team-key-integration", ProjectID: "project-key-integration", OrganizationID: "organization-key-integration", BudgetID: "budget-key-integration", ExpiresAt: &expires}
 	if err := store.CreateVirtualKey(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := store.GetVirtualKey(context.Background(), record.TokenHash)
-	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || loaded.OrganizationID != record.OrganizationID || len(loaded.Models) != 5 {
+	if err != nil || loaded.KeyAlias != record.KeyAlias || loaded.TeamID != record.TeamID || loaded.ProjectID != record.ProjectID || loaded.OrganizationID != record.OrganizationID || loaded.BudgetID != record.BudgetID || len(loaded.Models) != 5 {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
 	}
 	if _, err := auth.NewValidator(store).Validate(context.Background(), "sk-integration-test", "project-model"); err == nil {
@@ -83,7 +83,7 @@ func TestVirtualKeyStoreLifecycle(t *testing.T) {
 	}
 	regeneratedHash := auth.HashKey("sk-regenerated-integration-test")
 	regenerated, err := store.RegenerateVirtualKey(context.Background(), record.TokenHash, regeneratedHash)
-	if err != nil || regenerated.TokenHash != regeneratedHash || regenerated.ProjectID != record.ProjectID || regenerated.OrganizationID != record.OrganizationID {
+	if err != nil || regenerated.TokenHash != regeneratedHash || regenerated.ProjectID != record.ProjectID || regenerated.OrganizationID != record.OrganizationID || regenerated.BudgetID != record.BudgetID {
 		t.Fatalf("regenerated=%#v err=%v", regenerated, err)
 	}
 	if _, err := store.GetVirtualKey(context.Background(), record.TokenHash); err == nil {

@@ -31,7 +31,7 @@ func TestModelsRequiresMasterKey(t *testing.T) {
 func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	manager := &memoryKeyManager{records: map[string]auth.ManagedVirtualKey{}}
 	server := NewServer(config.Config{MasterKey: "master-key"}).WithVirtualKeyManager(manager)
-	generate := httptest.NewRequest(http.MethodPost, "/key/generate", strings.NewReader(`{"key":"sk-test-key","key_alias":"integration","models":["gateway-model"],"organization_id":"org-test","rpm_limit":12}`))
+	generate := httptest.NewRequest(http.MethodPost, "/key/generate", strings.NewReader(`{"key":"sk-test-key","key_alias":"integration","models":["gateway-model"],"organization_id":"org-test","budget_id":"budget-test","rpm_limit":12}`))
 	generate.Header.Set("Authorization", "Bearer master-key")
 	generated := httptest.NewRecorder()
 	server.Handler().ServeHTTP(generated, generate)
@@ -43,6 +43,9 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 	}
 	if manager.records[auth.HashKey("sk-test-key")].OrganizationID != "org-test" {
 		t.Fatalf("organization scope was not persisted: %#v", manager.records)
+	}
+	if manager.records[auth.HashKey("sk-test-key")].BudgetID != "budget-test" {
+		t.Fatalf("budget scope was not persisted: %#v", manager.records)
 	}
 
 	info := httptest.NewRequest(http.MethodGet, "/key/info?key=sk-test-key", nil)

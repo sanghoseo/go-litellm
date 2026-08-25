@@ -22,6 +22,7 @@ type VirtualKey struct {
 	ProjectModels      []string
 	OrganizationID     string
 	OrganizationModels []string
+	BudgetID           string
 	ExpiresAt          *time.Time
 	Blocked            bool
 	RPMLimit           *int64
@@ -36,6 +37,7 @@ type ManagedVirtualKey struct {
 	TeamModels     []string
 	ProjectID      string
 	OrganizationID string
+	BudgetID       string
 	ExpiresAt      *time.Time
 	Blocked        bool
 	RPMLimit       *int64
