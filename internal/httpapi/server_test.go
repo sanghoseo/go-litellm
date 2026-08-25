@@ -214,6 +214,20 @@ func TestChatCompletionsFallsBackAfterProviderError(t *testing.T) {
 	}
 }
 
+func TestEmbeddingsFallsBackAfterProviderError(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
+		{Name: "embedding-model", Model: "openai/text-embedding", APIBase: "https://one.example"},
+		{Name: "embedding-model", Model: "openai/text-embedding", APIBase: "https://two.example"},
+	}}, fallbackProvider{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embedding-model","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != `{"deployment":"two"}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 type stubChatCompleter struct{}
 
 type deploymentCapturingCompleter struct {
@@ -223,6 +237,21 @@ type deploymentCapturingCompleter struct {
 type fallbackChatCompleter struct{}
 
 func (fallbackChatCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
+	if deployment.APIBase == "https://one.example" {
+		return providers.Response{}, errors.New("first deployment failed")
+	}
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"deployment":"two"}`))}, nil
+}
+
+type fallbackProvider struct{}
+
+func (fallbackProvider) ChatCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (fallbackProvider) CreateResponse(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (fallbackProvider) CreateEmbedding(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
 	if deployment.APIBase == "https://one.example" {
 		return providers.Response{}, errors.New("first deployment failed")
 	}

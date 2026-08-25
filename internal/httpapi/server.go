@@ -161,7 +161,7 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
-	upstream, err := completer(request.Context(), deployment, body)
+	upstream, err := server.completeModelWithFallback(request.Context(), modelName, deployment, body, completer)
 	if err != nil {
 		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
 		return
@@ -226,7 +226,7 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	}
 
 	startedAt := time.Now().UTC()
-	upstream, err := server.completeWithFallback(request.Context(), modelName, deployment, body)
+	upstream, err := server.completeModelWithFallback(request.Context(), modelName, deployment, body, server.chatCompleter.ChatCompletion)
 	if err != nil {
 		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
 		return
@@ -243,10 +243,10 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode)
 }
 
-func (server Server) completeWithFallback(ctx context.Context, modelName string, deployment config.Model, body []byte) (providers.Response, error) {
+func (server Server) completeModelWithFallback(ctx context.Context, modelName string, deployment config.Model, body []byte, completer modelRequestCompleter) (providers.Response, error) {
 	failed := []config.Model{}
 	for {
-		response, err := server.chatCompleter.ChatCompletion(ctx, deployment, body)
+		response, err := completer(ctx, deployment, body)
 		if err == nil {
 			return response, nil
 		}
