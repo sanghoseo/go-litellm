@@ -1624,10 +1624,15 @@ func (server Server) models(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	models := make([]modelResponse, 0, len(server.config.Models))
+	seen := make(map[string]struct{}, len(server.config.Models))
 	for _, configuredModel := range server.config.Models {
 		if !auth.AllowsModel(virtualKey, configuredModel.Name) {
 			continue
 		}
+		if _, found := seen[configuredModel.Name]; found {
+			continue
+		}
+		seen[configuredModel.Name] = struct{}{}
 		models = append(models, modelResponse{
 			ID:      configuredModel.Name,
 			Object:  "model",

@@ -353,6 +353,17 @@ func TestModelsReturnsConfiguredModels(t *testing.T) {
 	}
 }
 
+func TestModelsListsEachModelGroupOnce(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "shared", Model: "openai/a"}, {Name: "shared", Model: "openai/b"}}})
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Count(response.Body.String(), `"id":"shared"`) != 1 {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestModelReturnsConfiguredModelAndRejectsUnknownModel(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gpt-test", Model: "openai/gpt-test"}}})
 	request := httptest.NewRequest(http.MethodGet, "/v1/models/gpt-test", nil)
