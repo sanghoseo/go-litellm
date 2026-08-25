@@ -317,6 +317,17 @@ func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
 	}
 }
 
+func TestOpenAIV1PrefixAliasesOpenAICompatibleRoutes(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}}, stubChatCompleter{})
+	request := httptest.NewRequest(http.MethodPost, "/openai/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestChatCompletionsRejectsVirtualKeyForOtherModel(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(
 		config.Config{Models: []config.Model{

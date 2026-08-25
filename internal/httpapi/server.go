@@ -302,12 +302,26 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/file_batches", server.vectorStoreFileBatches)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}/file_batches/{fileBatchID}", server.vectorStoreFileBatch)
 	mux.HandleFunc("POST /v1/vector_stores/{vectorStoreID}/file_batches/{fileBatchID}/cancel", server.cancelVectorStoreFileBatch)
-	handler := server.withRequestID(mux)
+	handler := server.withOpenAIPrefix(server.withRequestID(mux))
 	if server.metrics == nil {
 		return handler
 	}
 	mux.Handle("GET /metrics", server.metrics.Handler())
 	return server.metrics.Wrap(handler)
+}
+
+func (server Server) withOpenAIPrefix(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if !strings.HasPrefix(request.URL.Path, "/openai/v1/") {
+			next.ServeHTTP(writer, request)
+			return
+		}
+		copy := request.Clone(request.Context())
+		url := *request.URL
+		url.Path = strings.TrimPrefix(url.Path, "/openai")
+		copy.URL = &url
+		next.ServeHTTP(writer, copy)
+	})
 }
 
 func (server Server) withRequestID(next http.Handler) http.Handler {
