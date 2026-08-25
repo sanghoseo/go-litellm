@@ -233,6 +233,20 @@ func TestChatCompletionsRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestEmbeddingsRecordsUsage(t *testing.T) {
+	recorder := &recordingUsageRecorder{}
+	server := NewServerWithDependencies(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "embedding-model", Model: "openai/text-embedding"}}},
+		usageEmbeddingCompleter{}, nil, recorder,
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"embedding-model","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	server.Handler().ServeHTTP(httptest.NewRecorder(), request)
+	if len(recorder.records) != 1 || recorder.records[0].CallType != "embedding" || recorder.records[0].Usage.TotalTokens != 2 {
+		t.Fatalf("records=%#v", recorder.records)
+	}
+}
+
 func TestChatCompletionsReturnsCachedResponse(t *testing.T) {
 	cache := &memoryResponseCache{values: map[string][]byte{}}
 	server := NewServerWithRuntime(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}}, usageChatCompleter{}, nil, nil, nil).WithResponseCache(cache)
@@ -565,6 +579,18 @@ type usageChatCompleter struct{}
 
 func (usageChatCompleter) ChatCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
 	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))}, nil
+}
+
+type usageEmbeddingCompleter struct{}
+
+func (usageEmbeddingCompleter) ChatCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (usageEmbeddingCompleter) CreateResponse(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (usageEmbeddingCompleter) CreateEmbedding(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"usage":{"prompt_tokens":2,"total_tokens":2}}`))}, nil
 }
 
 type recordingUsageRecorder struct{ records []usage.Record }

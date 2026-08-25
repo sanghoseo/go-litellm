@@ -189,7 +189,7 @@ func (server Server) responses(writer http.ResponseWriter, request *http.Request
 		server.providerUnavailable(writer, "No responses provider is configured")
 		return
 	}
-	server.forwardModelRequest(writer, request, server.responseMaker.CreateResponse)
+	server.forwardModelRequest(writer, request, "responses", server.responseMaker.CreateResponse)
 }
 
 func (server Server) embeddings(writer http.ResponseWriter, request *http.Request) {
@@ -197,7 +197,7 @@ func (server Server) embeddings(writer http.ResponseWriter, request *http.Reques
 		server.providerUnavailable(writer, "No embedding provider is configured")
 		return
 	}
-	server.forwardModelRequest(writer, request, server.embedder.CreateEmbedding)
+	server.forwardModelRequest(writer, request, "embedding", server.embedder.CreateEmbedding)
 }
 
 func (server Server) moderations(writer http.ResponseWriter, request *http.Request) {
@@ -205,7 +205,7 @@ func (server Server) moderations(writer http.ResponseWriter, request *http.Reque
 		server.providerUnavailable(writer, "No moderation provider is configured")
 		return
 	}
-	server.forwardModelRequest(writer, request, server.moderator.Moderate)
+	server.forwardModelRequest(writer, request, "moderation", server.moderator.Moderate)
 }
 
 func (server Server) images(writer http.ResponseWriter, request *http.Request) {
@@ -213,7 +213,7 @@ func (server Server) images(writer http.ResponseWriter, request *http.Request) {
 		server.providerUnavailable(writer, "No image generation provider is configured")
 		return
 	}
-	server.forwardModelRequest(writer, request, server.imageGenerator.GenerateImage)
+	server.forwardModelRequest(writer, request, "image_generation", server.imageGenerator.GenerateImage)
 }
 
 func (server Server) imageEdits(writer http.ResponseWriter, request *http.Request) {
@@ -225,7 +225,7 @@ func (server Server) speech(writer http.ResponseWriter, request *http.Request) {
 		server.providerUnavailable(writer, "No speech provider is configured")
 		return
 	}
-	server.forwardModelRequest(writer, request, server.speechCreator.CreateSpeech)
+	server.forwardModelRequest(writer, request, "speech", server.speechCreator.CreateSpeech)
 }
 
 func (server Server) transcription(writer http.ResponseWriter, request *http.Request) {
@@ -524,7 +524,7 @@ func (server Server) regenerateKey(writer http.ResponseWriter, request *http.Req
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
 
-func (server Server) forwardModelRequest(writer http.ResponseWriter, request *http.Request, completer modelRequestCompleter) {
+func (server Server) forwardModelRequest(writer http.ResponseWriter, request *http.Request, callType string, completer modelRequestCompleter) {
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 10<<20))
 	if err != nil {
 		writeJSON(writer, http.StatusRequestEntityTooLarge, openAIError{Message: "Request body exceeds 10 MiB", Type: "invalid_request_error", Code: "request_too_large"})
@@ -549,6 +549,7 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
+	startedAt := time.Now().UTC()
 	upstream, err := server.completeModelWithFallback(request.Context(), modelName, deployment, body, completer)
 	if err != nil {
 		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})
@@ -557,7 +558,9 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 	defer upstream.Body.Close()
 	copyResponseHeaders(writer.Header(), upstream.Header)
 	writer.WriteHeader(upstream.StatusCode)
-	_ = copyResponse(writer, upstream.Body)
+	responseBody := bytes.Buffer{}
+	_ = copyResponse(writer, io.TeeReader(upstream.Body, &responseBody))
+	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode, callType)
 }
 
 func (server Server) allowedByRateLimit(ctx context.Context, virtualKey auth.VirtualKey, modelName string) bool {
@@ -628,7 +631,7 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	if cacheKey != "" && upstream.StatusCode >= http.StatusOK && upstream.StatusCode < http.StatusMultipleChoices {
 		_ = server.responseCache.Set(request.Context(), cacheKey, responseBody.Bytes(), time.Minute)
 	}
-	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode)
+	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode, "chat_completion")
 }
 
 func (server Server) completions(writer http.ResponseWriter, request *http.Request) {
@@ -636,7 +639,7 @@ func (server Server) completions(writer http.ResponseWriter, request *http.Reque
 		server.providerUnavailable(writer, "No text completion provider is configured")
 		return
 	}
-	server.forwardModelRequest(writer, request, server.textCompleter.TextCompletion)
+	server.forwardModelRequest(writer, request, "text_completion", server.textCompleter.TextCompletion)
 }
 
 func (server Server) completeModelWithFallback(ctx context.Context, modelName string, deployment config.Model, body []byte, completer modelRequestCompleter) (providers.Response, error) {
@@ -679,7 +682,7 @@ func isStreamingRequest(body []byte) bool {
 	return json.Unmarshal(body, &payload) == nil && payload.Stream
 }
 
-func (server Server) recordUsage(ctx context.Context, keyHash string, deployment config.Model, body []byte, startedAt time.Time, statusCode int) {
+func (server Server) recordUsage(ctx context.Context, keyHash string, deployment config.Model, body []byte, startedAt time.Time, statusCode int, callType string) {
 	if server.usageRecorder == nil {
 		return
 	}
@@ -692,7 +695,7 @@ func (server Server) recordUsage(ctx context.Context, keyHash string, deployment
 		return
 	}
 	provider, _, _ := strings.Cut(deployment.Model, "/")
-	_ = server.usageRecorder.Insert(ctx, usage.Record{RequestID: requestID, CallType: "chat_completion", APIKeyHash: keyHash, Model: deployment.Name, Provider: provider, APIBase: deployment.APIBase, StartedAt: startedAt, CompletedAt: time.Now().UTC(), Usage: responseUsage, Status: http.StatusText(statusCode)})
+	_ = server.usageRecorder.Insert(ctx, usage.Record{RequestID: requestID, CallType: callType, APIKeyHash: keyHash, Model: deployment.Name, Provider: provider, APIBase: deployment.APIBase, StartedAt: startedAt, CompletedAt: time.Now().UTC(), Usage: responseUsage, Status: http.StatusText(statusCode)})
 }
 
 func requestedModel(body []byte) (string, error) {
