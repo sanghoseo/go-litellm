@@ -387,6 +387,22 @@ func TestModerationsForwardsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+func TestRerankForwardsOpenAICompatibleRequest(t *testing.T) {
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "rerank-model", Model: "openai/rerank-test"}}},
+		mediaProvider{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/rerank", strings.NewReader(`{"model":"rerank-model","query":"hello","documents":["one"]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"results":[{"index":0,"relevance_score":1}]}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 	provider := &resourceProvider{}
 	server := NewServer(
@@ -553,6 +569,9 @@ func (mediaProvider) CreateSpeech(context.Context, config.Model, []byte) (provid
 }
 func (mediaProvider) Moderate(context.Context, config.Model, []byte) (providers.Response, error) {
 	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"flagged":false}]}`))}, nil
+}
+func (mediaProvider) Rerank(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"index":0,"relevance_score":1}]}`))}, nil
 }
 
 type resourceProvider struct {

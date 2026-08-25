@@ -146,3 +146,19 @@ func TestTextCompletionUsesOpenAICompletionsEndpoint(t *testing.T) {
 	}
 	defer response.Body.Close()
 }
+
+func TestRerankUsesConfiguredRerankEndpoint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/rerank" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).Rerank(context.Background(), config.Model{Model: "openai/rerank-test", APIBase: upstream.URL + "/v1"}, []byte(`{"model":"gateway-model","query":"hello","documents":["one"]}`))
+	if err != nil {
+		t.Fatalf("Rerank() error = %v", err)
+	}
+	defer response.Body.Close()
+}

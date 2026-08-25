@@ -131,6 +131,20 @@ func (registry Registry) TextCompletion(ctx context.Context, deployment config.M
 	})
 }
 
+func (registry Registry) Rerank(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
+	client, err := registry.clientFor(deployment)
+	if err != nil {
+		return Response{}, err
+	}
+	reranker, ok := client.(Reranker)
+	if !ok {
+		return Response{}, ErrProviderNotConfigured
+	}
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return reranker.Rerank(callContext, deployment, body)
+	})
+}
+
 func retry(ctx context.Context, deployment config.Model, call func(context.Context) (Response, error)) (Response, error) {
 	attempts := deployment.NumRetries + 1
 	for attempt := 0; attempt < attempts; attempt++ {

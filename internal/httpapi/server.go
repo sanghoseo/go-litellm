@@ -48,6 +48,7 @@ type Server struct {
 	imageGenerator  providers.ImageGenerator
 	speechCreator   providers.SpeechCreator
 	moderator       providers.Moderator
+	reranker        providers.Reranker
 	passthrough     providers.PassthroughClient
 	keyValidator    VirtualKeyValidator
 	router          *routing.Router
@@ -112,6 +113,9 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 	if moderator, ok := completer.(providers.Moderator); ok {
 		server.moderator = moderator
 	}
+	if reranker, ok := completer.(providers.Reranker); ok {
+		server.reranker = reranker
+	}
 	if passthrough, ok := completer.(providers.PassthroughClient); ok {
 		server.passthrough = passthrough
 	}
@@ -135,6 +139,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	mux.HandleFunc("POST /v1/moderations", server.moderations)
+	mux.HandleFunc("POST /v1/rerank", server.rerank)
 	mux.HandleFunc("POST /v1/images/generations", server.images)
 	mux.HandleFunc("POST /v1/images/edits", server.imageEdits)
 	mux.HandleFunc("POST /v1/audio/speech", server.speech)
@@ -206,6 +211,14 @@ func (server Server) moderations(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	server.forwardModelRequest(writer, request, "moderation", server.moderator.Moderate)
+}
+
+func (server Server) rerank(writer http.ResponseWriter, request *http.Request) {
+	if server.reranker == nil {
+		server.providerUnavailable(writer, "No rerank provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, "rerank", server.reranker.Rerank)
 }
 
 func (server Server) images(writer http.ResponseWriter, request *http.Request) {
