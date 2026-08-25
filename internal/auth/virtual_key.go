@@ -16,6 +16,7 @@ type VirtualKey struct {
 	Models    []string
 	UserID    string
 	TeamID    string
+	ProjectID string
 	ExpiresAt *time.Time
 	Blocked   bool
 	RPMLimit  *int64
@@ -27,6 +28,7 @@ type ManagedVirtualKey struct {
 	Models    []string
 	UserID    string
 	TeamID    string
+	ProjectID string
 	ExpiresAt *time.Time
 	Blocked   bool
 	RPMLimit  *int64
@@ -81,6 +83,24 @@ type UserManager interface {
 	ListUsers(context.Context, int) ([]ManagedUser, error)
 	SetUserBlocked(context.Context, string, bool) (bool, error)
 	DeleteUser(context.Context, string) (bool, error)
+}
+
+type ManagedProject struct {
+	ProjectID    string
+	ProjectAlias string
+	Description  string
+	TeamID       string
+	BudgetID     string
+	Models       []string
+	Blocked      bool
+}
+
+type ProjectManager interface {
+	CreateProject(context.Context, ManagedProject) error
+	GetProject(context.Context, string) (ManagedProject, error)
+	ListProjects(context.Context, int) ([]ManagedProject, error)
+	SetProjectBlocked(context.Context, string, bool) (bool, error)
+	DeleteProject(context.Context, string) (bool, error)
 }
 
 type VirtualKeyStore interface {

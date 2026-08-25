@@ -60,6 +60,7 @@ type Server struct {
 	keyManager      auth.VirtualKeyManager
 	teamManager     auth.TeamManager
 	userManager     auth.UserManager
+	projectManager  auth.ProjectManager
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -79,6 +80,11 @@ func (server Server) WithTeamManager(manager auth.TeamManager) Server {
 
 func (server Server) WithUserManager(manager auth.UserManager) Server {
 	server.userManager = manager
+	return server
+}
+
+func (server Server) WithProjectManager(manager auth.ProjectManager) Server {
+	server.projectManager = manager
 	return server
 }
 
@@ -159,6 +165,12 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /user/block", server.blockUser)
 	mux.HandleFunc("POST /user/unblock", server.unblockUser)
 	mux.HandleFunc("POST /user/delete", server.deleteUser)
+	mux.HandleFunc("POST /project/new", server.createProject)
+	mux.HandleFunc("GET /project/info", server.projectInfo)
+	mux.HandleFunc("GET /project/list", server.listProjects)
+	mux.HandleFunc("POST /project/block", server.blockProject)
+	mux.HandleFunc("POST /project/unblock", server.unblockProject)
+	mux.HandleFunc("POST /project/delete", server.deleteProject)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -370,24 +382,26 @@ func (server Server) forwardPassthrough(writer http.ResponseWriter, request *htt
 }
 
 type keyGenerateRequest struct {
-	Key      string     `json:"key"`
-	KeyAlias string     `json:"key_alias"`
-	Models   []string   `json:"models"`
-	UserID   string     `json:"user_id"`
-	TeamID   string     `json:"team_id"`
-	Expires  *time.Time `json:"expires"`
-	RPMLimit *int64     `json:"rpm_limit"`
+	Key       string     `json:"key"`
+	KeyAlias  string     `json:"key_alias"`
+	Models    []string   `json:"models"`
+	UserID    string     `json:"user_id"`
+	TeamID    string     `json:"team_id"`
+	ProjectID string     `json:"project_id"`
+	Expires   *time.Time `json:"expires"`
+	RPMLimit  *int64     `json:"rpm_limit"`
 }
 
 type keyResponse struct {
-	Key      string     `json:"key,omitempty"`
-	KeyAlias string     `json:"key_alias,omitempty"`
-	Models   []string   `json:"models"`
-	UserID   string     `json:"user_id,omitempty"`
-	TeamID   string     `json:"team_id,omitempty"`
-	Expires  *time.Time `json:"expires,omitempty"`
-	Blocked  bool       `json:"blocked"`
-	RPMLimit *int64     `json:"rpm_limit,omitempty"`
+	Key       string     `json:"key,omitempty"`
+	KeyAlias  string     `json:"key_alias,omitempty"`
+	Models    []string   `json:"models"`
+	UserID    string     `json:"user_id,omitempty"`
+	TeamID    string     `json:"team_id,omitempty"`
+	ProjectID string     `json:"project_id,omitempty"`
+	Expires   *time.Time `json:"expires,omitempty"`
+	Blocked   bool       `json:"blocked"`
+	RPMLimit  *int64     `json:"rpm_limit,omitempty"`
 }
 
 type keyUpdateRequest struct {
@@ -421,7 +435,7 @@ func (server Server) generateKey(writer http.ResponseWriter, request *http.Reque
 		}
 		rawKey = "sk-" + value
 	}
-	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey(rawKey), KeyAlias: input.KeyAlias, Models: input.Models, UserID: input.UserID, TeamID: input.TeamID, ExpiresAt: input.Expires, RPMLimit: input.RPMLimit}
+	record := auth.ManagedVirtualKey{TokenHash: auth.HashKey(rawKey), KeyAlias: input.KeyAlias, Models: input.Models, UserID: input.UserID, TeamID: input.TeamID, ProjectID: input.ProjectID, ExpiresAt: input.Expires, RPMLimit: input.RPMLimit}
 	if err := server.keyManager.CreateVirtualKey(request.Context(), record); err != nil {
 		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create key", Type: "server_error", Code: "key_creation_failed"})
 		return
@@ -827,6 +841,141 @@ func (server Server) deleteUser(writer http.ResponseWriter, request *http.Reques
 
 func userResponseFrom(user auth.ManagedUser) userResponse {
 	return userResponse{UserID: user.UserID, UserAlias: user.UserAlias, TeamID: user.TeamID, UserEmail: user.UserEmail, Models: nonNilStrings(user.Models), Blocked: user.Blocked}
+}
+
+type projectRequest struct {
+	ProjectID    string   `json:"project_id"`
+	ProjectAlias string   `json:"project_alias"`
+	Description  string   `json:"description"`
+	TeamID       string   `json:"team_id"`
+	BudgetID     string   `json:"budget_id"`
+	Models       []string `json:"models"`
+}
+
+type projectResponse struct {
+	ProjectID    string   `json:"project_id"`
+	ProjectAlias string   `json:"project_alias,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	TeamID       string   `json:"team_id,omitempty"`
+	BudgetID     string   `json:"budget_id,omitempty"`
+	Models       []string `json:"models"`
+	Blocked      bool     `json:"blocked"`
+}
+
+func (server Server) createProject(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.projectManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input projectRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.TeamID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'team_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	if input.ProjectID == "" {
+		id, err := litellm.UUID4()
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not generate project id", Type: "server_error", Code: "project_creation_failed"})
+			return
+		}
+		input.ProjectID = "project-" + id
+	}
+	project := auth.ManagedProject{ProjectID: input.ProjectID, ProjectAlias: input.ProjectAlias, Description: input.Description, TeamID: input.TeamID, BudgetID: input.BudgetID, Models: input.Models}
+	if err := server.projectManager.CreateProject(request.Context(), project); err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not create project", Type: "server_error", Code: "project_creation_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, projectResponseFrom(project))
+}
+
+func (server Server) projectInfo(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.projectManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	projectID := request.URL.Query().Get("project_id")
+	if projectID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'project_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	project, err := server.projectManager.GetProject(request.Context(), projectID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "Project not found", Type: "invalid_request_error", Code: "project_not_found"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, projectResponseFrom(project))
+}
+
+func (server Server) listProjects(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.projectManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	projects, err := server.projectManager.ListProjects(request.Context(), 100)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not list projects", Type: "server_error", Code: "project_list_failed"})
+		return
+	}
+	response := make([]projectResponse, 0, len(projects))
+	for _, project := range projects {
+		response = append(response, projectResponseFrom(project))
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+}
+
+func (server Server) blockProject(writer http.ResponseWriter, request *http.Request) {
+	server.setProjectBlocked(writer, request, true)
+}
+func (server Server) unblockProject(writer http.ResponseWriter, request *http.Request) {
+	server.setProjectBlocked(writer, request, false)
+}
+
+func (server Server) setProjectBlocked(writer http.ResponseWriter, request *http.Request, blocked bool) {
+	if !server.authorizeAdmin(request) || server.projectManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.ProjectID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'project_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.projectManager.SetProjectBlocked(request.Context(), input.ProjectID, blocked)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update project", Type: "server_error", Code: "project_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"updated": updated, "blocked": blocked})
+}
+
+func (server Server) deleteProject(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.projectManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.ProjectID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'project_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	deleted, err := server.projectManager.DeleteProject(request.Context(), input.ProjectID)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete project", Type: "server_error", Code: "project_deletion_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
+}
+
+func projectResponseFrom(project auth.ManagedProject) projectResponse {
+	return projectResponse{ProjectID: project.ProjectID, ProjectAlias: project.ProjectAlias, Description: project.Description, TeamID: project.TeamID, BudgetID: project.BudgetID, Models: nonNilStrings(project.Models), Blocked: project.Blocked}
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)

@@ -26,11 +26,12 @@ func (store VirtualKeyStore) FindVirtualKey(ctx context.Context, tokenHash strin
 
 	key := auth.VirtualKey{}
 	err := store.pool.QueryRow(ctx, `
-SELECT k."token", COALESCE(k."models", ARRAY[]::TEXT[]), COALESCE(k."user_id", ''), COALESCE(k."team_id", ''), k."expires", COALESCE(k."blocked", false) OR COALESCE(u."blocked", false) OR COALESCE(t."blocked", false), k."rpm_limit"
+SELECT k."token", COALESCE(k."models", ARRAY[]::TEXT[]), COALESCE(k."user_id", ''), COALESCE(k."team_id", ''), COALESCE(k."project_id", ''), k."expires", COALESCE(k."blocked", false) OR COALESCE(u."blocked", false) OR COALESCE(t."blocked", false) OR COALESCE(p."blocked", false), k."rpm_limit"
 FROM "LiteLLM_VerificationToken" k
 LEFT JOIN "LiteLLM_UserTable" u ON u."user_id" = k."user_id"
 LEFT JOIN "LiteLLM_TeamTable" t ON t."team_id" = k."team_id"
-WHERE k."token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.UserID, &key.TeamID, &key.ExpiresAt, &key.Blocked, &key.RPMLimit)
+LEFT JOIN "LiteLLM_ProjectTable" p ON p."project_id" = k."project_id"
+WHERE k."token" = $1`, tokenHash).Scan(&key.TokenHash, &key.Models, &key.UserID, &key.TeamID, &key.ProjectID, &key.ExpiresAt, &key.Blocked, &key.RPMLimit)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.VirtualKey{}, auth.ErrInvalidVirtualKey
 	}
@@ -48,8 +49,8 @@ func (store VirtualKeyStore) CreateVirtualKey(ctx context.Context, record auth.M
 		return auth.ErrInvalidVirtualKey
 	}
 	_, err := store.pool.Exec(ctx, `
-INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "user_id", "team_id", "expires", "blocked", "rpm_limit")
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, record.TokenHash, record.KeyAlias, record.Models, record.UserID, record.TeamID, record.ExpiresAt, record.Blocked, record.RPMLimit)
+INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "user_id", "team_id", "project_id", "expires", "blocked", "rpm_limit")
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, record.TokenHash, record.KeyAlias, record.Models, record.UserID, record.TeamID, record.ProjectID, record.ExpiresAt, record.Blocked, record.RPMLimit)
 	if err != nil {
 		return fmt.Errorf("create virtual key: %w", err)
 	}
