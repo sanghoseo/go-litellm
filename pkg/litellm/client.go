@@ -55,6 +55,22 @@ func (client Client) TextCompletion(ctx context.Context, request proxytpes.TextC
 	return response, nil
 }
 
+func (client Client) Moderation(ctx context.Context, request proxytpes.ModerationRequest) (proxytpes.ModerationResponse, error) {
+	response := proxytpes.ModerationResponse{}
+	if err := client.post(ctx, "moderations", request, &response); err != nil {
+		return proxytpes.ModerationResponse{}, err
+	}
+	return response, nil
+}
+
+func (client Client) Rerank(ctx context.Context, request proxytpes.RerankRequest) (proxytpes.RerankResponse, error) {
+	response := proxytpes.RerankResponse{}
+	if err := client.post(ctx, "rerank", request, &response); err != nil {
+		return proxytpes.RerankResponse{}, err
+	}
+	return response, nil
+}
+
 func (client Client) TextCompletionStream(ctx context.Context, request proxytpes.TextCompletionRequest) (TextStream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)

@@ -59,6 +59,29 @@ func TestTextCompletionUsesOpenAIProxyContract(t *testing.T) {
 	}
 }
 
+func TestClientModerationAndRerank(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/v1/moderations":
+			_, _ = writer.Write([]byte(`{"id":"modr-1","results":[{"flagged":false,"categories":{},"category_scores":{}}]}`))
+		case "/v1/rerank":
+			_, _ = writer.Write([]byte(`{"results":[{"index":0,"relevance_score":0.9}]}`))
+		default:
+			t.Fatalf("path=%q", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	client := Client{BaseURL: server.URL + "/v1", HTTPClient: server.Client()}
+	moderation, err := client.Moderation(context.Background(), proxytpes.ModerationRequest{Model: "moderation-model", Input: "hello"})
+	if err != nil || moderation.ID != "modr-1" || len(moderation.Results) != 1 || moderation.Results[0].Flagged {
+		t.Fatalf("moderation=%#v err=%v", moderation, err)
+	}
+	rerank, err := client.Rerank(context.Background(), proxytpes.RerankRequest{Model: "rerank-model", Query: "hello", Documents: []string{"hello"}})
+	if err != nil || len(rerank.Results) != 1 || rerank.Results[0].RelevanceScore != 0.9 {
+		t.Fatalf("rerank=%#v err=%v", rerank, err)
+	}
+}
+
 func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {
