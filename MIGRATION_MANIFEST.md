@@ -16,7 +16,7 @@
 | E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis cache·chat/text/response/embedding/moderation usage·spend·RPM·readiness·master-key 기반 virtual key·team·user·project·organization 생성/조회/목록/부분수정/차단·해제/삭제 및 user/team/project/organization/key 모델 allowlist 교차 검증 이식 |
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | Prometheus HTTP metrics·request ID 전파 이식 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/httpapi/`, `internal/providers/` | embeddings·rerank·moderations·OpenAI-compatible image generation/edit, audio/files/batches/vector stores API pass-through 이식; LiteLLM 관리형 multi-provider vector-store registry 대기 |
-| H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | Prisma/Node 부트스트랩은 단일 Go 바이너리 범위에서 제거; 핵심 운영 DDL 및 `LITELLM_SET_REPLICA_IDENTITY_FULL` 논리 복제 옵션 이식 |
+| H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | `replica_identity.py`는 `migration.go`의 `ApplyReplicaIdentityFull`로 이식; `prisma_toolchain.py`·`utils.py`의 Prisma/Node 부트스트랩과 DB 매니저는 단일 Go 바이너리 범위에서 제거; 핵심 운영 DDL 이식 |
 | I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | 루트 config.yaml·timeout/retry/alias·resource deployment 선택 이식 |
 
 ## 완료 판정
