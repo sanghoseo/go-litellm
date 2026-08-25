@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -16,6 +17,53 @@ func EnsureCoreSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err := pool.Exec(ctx, statement); err != nil {
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
+	}
+	return nil
+}
+
+// ReplicaIdentityFullEnabled reports whether migrations should configure every
+// LiteLLM table for PostgreSQL logical replication. It intentionally accepts
+// the same common truthy values as the legacy proxy extras package.
+func ReplicaIdentityFullEnabled(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "t", "y", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// ApplyReplicaIdentityFull configures all LiteLLM tables in the active schema
+// for logical replication consumers. Callers should treat a failure as an
+// operational warning: normal proxy traffic does not require this setting.
+func ApplyReplicaIdentityFull(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return fmt.Errorf("PostgreSQL pool is required")
+	}
+	_, err := pool.Exec(ctx, `DO $$
+DECLARE
+    target regclass;
+BEGIN
+    SET LOCAL lock_timeout = '5s';
+    FOR target IN
+        SELECT c.oid::regclass
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind = 'r'
+          AND c.relreplident <> 'f'
+          AND n.nspname = ANY (current_schemas(false))
+          AND c.relname LIKE 'LiteLLM\_%'
+    LOOP
+        BEGIN
+            EXECUTE format('ALTER TABLE %s REPLICA IDENTITY FULL', target);
+        EXCEPTION WHEN lock_not_available THEN
+            RAISE WARNING 'REPLICA IDENTITY FULL skipped for %: table busy, retrying next run', target;
+        END;
+    END LOOP;
+END
+$$`)
+	if err != nil {
+		return fmt.Errorf("apply replica identity full: %w", err)
 	}
 	return nil
 }

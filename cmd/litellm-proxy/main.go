@@ -79,6 +79,11 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		if err := postgres.EnsureCoreSchema(context.Background(), database); err != nil {
 			return fmt.Errorf("initialize PostgreSQL schema: %w", err)
 		}
+		if postgres.ReplicaIdentityFullEnabled(os.Getenv("LITELLM_SET_REPLICA_IDENTITY_FULL")) {
+			if err := postgres.ApplyReplicaIdentityFull(context.Background(), database); err != nil {
+				slog.Warn("could not apply PostgreSQL replica identity full", "error", err)
+			}
+		}
 		virtualKeyStore := postgres.NewVirtualKeyStore(database)
 		keyValidator = auth.NewValidator(virtualKeyStore)
 		keyManager = virtualKeyStore
