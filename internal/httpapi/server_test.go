@@ -327,6 +327,22 @@ func TestSpeechForwardsOpenAICompatibleRequest(t *testing.T) {
 	}
 }
 
+func TestModerationsForwardsOpenAICompatibleRequest(t *testing.T) {
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "moderation-model", Model: "openai/omni-moderation-latest"}}},
+		mediaProvider{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/moderations", strings.NewReader(`{"model":"moderation-model","input":"hello"}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"results":[{"flagged":false}]}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 	provider := &resourceProvider{}
 	server := NewServer(
@@ -477,6 +493,9 @@ func (mediaProvider) GenerateImage(context.Context, config.Model, []byte) (provi
 }
 func (mediaProvider) CreateSpeech(context.Context, config.Model, []byte) (providers.Response, error) {
 	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("audio-bytes"))}, nil
+}
+func (mediaProvider) Moderate(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[{"flagged":false}]}`))}, nil
 }
 
 type resourceProvider struct {

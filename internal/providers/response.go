@@ -34,6 +34,10 @@ type SpeechCreator interface {
 	CreateSpeech(context.Context, config.Model, []byte) (Response, error)
 }
 
+type Moderator interface {
+	Moderate(context.Context, config.Model, []byte) (Response, error)
+}
+
 // PassthroughClient forwards OpenAI-compatible resource APIs whose request does
 // not necessarily include a model name, such as files and batches.
 type PassthroughClient interface {

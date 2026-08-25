@@ -45,6 +45,10 @@ func (client Client) CreateSpeech(ctx context.Context, deployment config.Model, 
 	return client.request(ctx, deployment, body, "audio/speech")
 }
 
+func (client Client) Moderate(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
+	return client.request(ctx, deployment, body, "moderations")
+}
+
 func (client Client) Passthrough(ctx context.Context, deployment config.Model, method, endpoint, contentType string, body []byte) (providers.Response, error) {
 	targetURL, err := endpointURL(deployment.APIBase, endpoint)
 	if err != nil {

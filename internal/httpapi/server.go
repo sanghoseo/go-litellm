@@ -46,6 +46,7 @@ type Server struct {
 	embedder        providers.Embedder
 	imageGenerator  providers.ImageGenerator
 	speechCreator   providers.SpeechCreator
+	moderator       providers.Moderator
 	passthrough     providers.PassthroughClient
 	keyValidator    VirtualKeyValidator
 	router          *routing.Router
@@ -104,6 +105,9 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 	if speechCreator, ok := completer.(providers.SpeechCreator); ok {
 		server.speechCreator = speechCreator
 	}
+	if moderator, ok := completer.(providers.Moderator); ok {
+		server.moderator = moderator
+	}
 	if passthrough, ok := completer.(providers.PassthroughClient); ok {
 		server.passthrough = passthrough
 	}
@@ -125,6 +129,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
+	mux.HandleFunc("POST /v1/moderations", server.moderations)
 	mux.HandleFunc("POST /v1/images/generations", server.images)
 	mux.HandleFunc("POST /v1/audio/speech", server.speech)
 	mux.HandleFunc("POST /v1/audio/transcriptions", server.transcription)
@@ -187,6 +192,14 @@ func (server Server) embeddings(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	server.forwardModelRequest(writer, request, server.embedder.CreateEmbedding)
+}
+
+func (server Server) moderations(writer http.ResponseWriter, request *http.Request) {
+	if server.moderator == nil {
+		server.providerUnavailable(writer, "No moderation provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, server.moderator.Moderate)
 }
 
 func (server Server) images(writer http.ResponseWriter, request *http.Request) {

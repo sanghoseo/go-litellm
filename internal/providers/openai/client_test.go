@@ -114,3 +114,19 @@ func TestPassthroughPreservesMultipartBody(t *testing.T) {
 	}
 	defer response.Body.Close()
 }
+
+func TestModerateUsesOpenAIModerationsEndpoint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/moderations" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).Moderate(context.Background(), config.Model{Model: "openai/omni-moderation-latest", APIBase: upstream.URL + "/v1"}, []byte(`{"model":"gateway-model","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("Moderate() error = %v", err)
+	}
+	defer response.Body.Close()
+}
