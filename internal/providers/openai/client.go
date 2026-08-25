@@ -37,6 +37,14 @@ func (client Client) CreateEmbedding(ctx context.Context, deployment config.Mode
 	return client.request(ctx, deployment, body, "embeddings")
 }
 
+func (client Client) GenerateImage(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
+	return client.request(ctx, deployment, body, "images/generations")
+}
+
+func (client Client) CreateSpeech(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
+	return client.request(ctx, deployment, body, "audio/speech")
+}
+
 func (client Client) request(ctx context.Context, deployment config.Model, body []byte, endpoint string) (providers.Response, error) {
 	targetURL, err := endpointURL(deployment.APIBase, endpoint)
 	if err != nil {

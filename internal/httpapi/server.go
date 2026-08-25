@@ -44,6 +44,8 @@ type Server struct {
 	chatCompleter   providers.ChatCompleter
 	responseMaker   providers.ResponseCreator
 	embedder        providers.Embedder
+	imageGenerator  providers.ImageGenerator
+	speechCreator   providers.SpeechCreator
 	keyValidator    VirtualKeyValidator
 	router          *routing.Router
 	usageRecorder   usage.Recorder
@@ -89,6 +91,12 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 	if embedder, ok := completer.(providers.Embedder); ok {
 		server.embedder = embedder
 	}
+	if imageGenerator, ok := completer.(providers.ImageGenerator); ok {
+		server.imageGenerator = imageGenerator
+	}
+	if speechCreator, ok := completer.(providers.SpeechCreator); ok {
+		server.speechCreator = speechCreator
+	}
 }
 
 func (server Server) Handler() http.Handler {
@@ -99,6 +107,8 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
+	mux.HandleFunc("POST /v1/images/generations", server.images)
+	mux.HandleFunc("POST /v1/audio/speech", server.speech)
 	handler := server.withRequestID(mux)
 	if server.metrics == nil {
 		return handler
@@ -132,6 +142,22 @@ func (server Server) embeddings(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	server.forwardModelRequest(writer, request, server.embedder.CreateEmbedding)
+}
+
+func (server Server) images(writer http.ResponseWriter, request *http.Request) {
+	if server.imageGenerator == nil {
+		server.providerUnavailable(writer, "No image generation provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, server.imageGenerator.GenerateImage)
+}
+
+func (server Server) speech(writer http.ResponseWriter, request *http.Request) {
+	if server.speechCreator == nil {
+		server.providerUnavailable(writer, "No speech provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, server.speechCreator.CreateSpeech)
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)

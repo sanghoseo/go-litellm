@@ -25,3 +25,11 @@ type ResponseCreator interface {
 type Embedder interface {
 	CreateEmbedding(context.Context, config.Model, []byte) (Response, error)
 }
+
+type ImageGenerator interface {
+	GenerateImage(context.Context, config.Model, []byte) (Response, error)
+}
+
+type SpeechCreator interface {
+	CreateSpeech(context.Context, config.Model, []byte) (Response, error)
+}

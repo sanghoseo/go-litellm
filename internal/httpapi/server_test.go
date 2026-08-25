@@ -228,6 +228,38 @@ func TestEmbeddingsFallsBackAfterProviderError(t *testing.T) {
 	}
 }
 
+func TestImagesForwardsOpenAICompatibleRequest(t *testing.T) {
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "image-model", Model: "openai/gpt-image-1"}}},
+		mediaProvider{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-model","prompt":"a lighthouse"}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"data":[{"url":"https://image.example/test"}]}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestSpeechForwardsOpenAICompatibleRequest(t *testing.T) {
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "speech-model", Model: "openai/gpt-4o-mini-tts"}}},
+		mediaProvider{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(`{"model":"speech-model","input":"hello","voice":"alloy"}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != "audio-bytes" {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 type stubChatCompleter struct{}
 
 type deploymentCapturingCompleter struct {
@@ -256,6 +288,24 @@ func (fallbackProvider) CreateEmbedding(_ context.Context, deployment config.Mod
 		return providers.Response{}, errors.New("first deployment failed")
 	}
 	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"deployment":"two"}`))}, nil
+}
+
+type mediaProvider struct{}
+
+func (mediaProvider) ChatCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (mediaProvider) CreateResponse(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (mediaProvider) CreateEmbedding(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{}, errors.New("not used")
+}
+func (mediaProvider) GenerateImage(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"url":"https://image.example/test"}]}`))}, nil
+}
+func (mediaProvider) CreateSpeech(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("audio-bytes"))}, nil
 }
 
 type usageChatCompleter struct{}

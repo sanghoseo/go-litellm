@@ -61,6 +61,34 @@ func (registry Registry) CreateEmbedding(ctx context.Context, deployment config.
 	})
 }
 
+func (registry Registry) GenerateImage(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
+	client, err := registry.clientFor(deployment)
+	if err != nil {
+		return Response{}, err
+	}
+	imageGenerator, ok := client.(ImageGenerator)
+	if !ok {
+		return Response{}, ErrProviderNotConfigured
+	}
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return imageGenerator.GenerateImage(callContext, deployment, body)
+	})
+}
+
+func (registry Registry) CreateSpeech(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
+	client, err := registry.clientFor(deployment)
+	if err != nil {
+		return Response{}, err
+	}
+	speechCreator, ok := client.(SpeechCreator)
+	if !ok {
+		return Response{}, ErrProviderNotConfigured
+	}
+	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
+		return speechCreator.CreateSpeech(callContext, deployment, body)
+	})
+}
+
 func retry(ctx context.Context, deployment config.Model, call func(context.Context) (Response, error)) (Response, error) {
 	attempts := deployment.NumRetries + 1
 	for attempt := 0; attempt < attempts; attempt++ {
