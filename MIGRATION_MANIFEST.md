@@ -17,7 +17,7 @@
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | 대기 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/api/`, `internal/providers/` | 대기 |
 | H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | 핵심 운영 DDL 이식 |
-| I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | YAML timeout/retry/alias 이식 |
+| I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | 루트 config.yaml·timeout/retry/alias 이식 |
 
 ## 완료 판정
 

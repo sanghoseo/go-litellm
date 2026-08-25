@@ -92,6 +92,17 @@ func TestLoadEnvFileDoesNotOverrideExistingEnvironment(t *testing.T) {
 	}
 }
 
+func TestRepositoryDefaultConfigLoads(t *testing.T) {
+	path := filepath.Join("..", "..", "config.yaml")
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(%q) error = %v", path, err)
+	}
+	if len(loaded.Models) != 1 || loaded.Models[0].Name != "gpt-4o-mini" || loaded.ModelAliases["default"] != "gpt-4o-mini" {
+		t.Fatalf("config = %#v", loaded)
+	}
+}
+
 func writeConfig(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

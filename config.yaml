@@ -1,0 +1,16 @@
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  request_timeout: 120
+  num_retries: 2
+
+router_settings:
+  model_group_alias:
+    default: gpt-4o-mini
