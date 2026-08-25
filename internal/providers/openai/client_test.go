@@ -49,3 +49,26 @@ func TestChatCompletionUsesDeploymentCredentialsAndModel(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
 	}
 }
+
+func TestChatCompletionStripsOpenAICompatibleProviderPrefix(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if string(body) != `{"messages":[],"model":"llama-3.3-70b-versatile"}` {
+			t.Fatalf("body = %s", body)
+		}
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).ChatCompletion(context.Background(), config.Model{
+		Model:   "groq/llama-3.3-70b-versatile",
+		APIBase: upstream.URL,
+	}, []byte(`{"model":"gateway-model","messages":[]}`))
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	defer response.Body.Close()
+}

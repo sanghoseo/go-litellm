@@ -95,13 +95,20 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		readinessChecks = append(readinessChecks, redisClient)
 	}
 
+	openAICompatible := openai.NewClient(nil)
 	providerRegistry := providers.NewRegistry(map[string]providers.Client{
-		"anthropic":  anthropic.NewClient(nil),
-		"azure":      azure.NewClient(nil),
-		"bedrock":    bedrock.NewClient(),
-		"gemini":     gemini.NewClient(nil),
-		"openai":     openai.NewClient(nil),
-		"openrouter": openrouter.NewClient(nil),
+		"anthropic":   anthropic.NewClient(nil),
+		"azure":       azure.NewClient(nil),
+		"bedrock":     bedrock.NewClient(),
+		"cerebras":    openAICompatible,
+		"deepseek":    openAICompatible,
+		"gemini":      gemini.NewClient(nil),
+		"groq":        openAICompatible,
+		"mistral":     openAICompatible,
+		"openai":      openAICompatible,
+		"openrouter":  openrouter.NewClient(nil),
+		"perplexity":  openAICompatible,
+		"together_ai": openAICompatible,
 	})
 	server := &http.Server{
 		Addr:              listenAddress,

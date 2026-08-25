@@ -89,7 +89,7 @@ func withProviderModel(body []byte, configuredModel string) ([]byte, error) {
 	}
 
 	providerModel := configuredModel
-	if provider, model, found := strings.Cut(configuredModel, "/"); found && provider == "openai" {
+	if _, model, found := strings.Cut(configuredModel, "/"); found {
 		providerModel = model
 	}
 	encodedModel, err := json.Marshal(providerModel)
