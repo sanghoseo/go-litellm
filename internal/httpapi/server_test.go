@@ -353,6 +353,24 @@ func TestModelsReturnsConfiguredModels(t *testing.T) {
 	}
 }
 
+func TestModelReturnsConfiguredModelAndRejectsUnknownModel(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gpt-test", Model: "openai/gpt-test"}}})
+	request := httptest.NewRequest(http.MethodGet, "/v1/models/gpt-test", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"gpt-test"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	unknownRequest := httptest.NewRequest(http.MethodGet, "/v1/models/unknown", nil)
+	unknownRequest.Header.Set("Authorization", "Bearer master-key")
+	unknownResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unknownResponse, unknownRequest)
+	if unknownResponse.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", unknownResponse.Code, unknownResponse.Body.String())
+	}
+}
+
 func TestHealthDoesNotRequireAuthentication(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key"})
 	request := httptest.NewRequest(http.MethodGet, "/health/liveliness", nil)

@@ -158,6 +158,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health/liveliness", server.health)
 	mux.HandleFunc("GET /health/readiness", server.readiness)
 	mux.HandleFunc("GET /v1/models", server.models)
+	mux.HandleFunc("GET /v1/models/{modelID}", server.model)
 	mux.HandleFunc("POST /key/generate", server.generateKey)
 	mux.HandleFunc("GET /key/info", server.keyInfo)
 	mux.HandleFunc("POST /key/delete", server.deleteKey)
@@ -1521,6 +1522,25 @@ func (server Server) models(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	writeJSON(writer, http.StatusOK, modelListResponse{Object: "list", Data: models})
+}
+
+func (server Server) model(writer http.ResponseWriter, request *http.Request) {
+	modelID := request.PathValue("modelID")
+	virtualKey, authorized := server.authorize(request, modelID)
+	if !authorized {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	if len(virtualKey.Models) > 0 && !contains(virtualKey.Models, modelID) {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "The model '" + modelID + "' does not exist", Type: "invalid_request_error", Code: "model_not_found"})
+		return
+	}
+	deployment, err := server.router.Select(modelID)
+	if err != nil {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "The model '" + modelID + "' does not exist", Type: "invalid_request_error", Code: "model_not_found"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, modelResponse{ID: modelID, Object: "model", Created: 0, OwnedBy: providerName(deployment.Model)})
 }
 
 func (server Server) authorize(request *http.Request, model string) (auth.VirtualKey, bool) {
