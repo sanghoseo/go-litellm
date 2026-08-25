@@ -1,6 +1,7 @@
 package litellm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,6 +13,11 @@ import (
 
 	proxytpes "github.com/BerriAI/litellm/go-proxy/pkg/types"
 )
+
+type Stream struct {
+	Chunks <-chan proxytpes.ChatCompletionChunk
+	Errors <-chan error
+}
 
 type Client struct {
 	BaseURL    string
@@ -42,6 +48,71 @@ func (client Client) Embedding(ctx context.Context, request proxytpes.EmbeddingR
 		return proxytpes.EmbeddingResponse{}, err
 	}
 	return response, nil
+}
+
+func (client Client) CompletionStream(ctx context.Context, request proxytpes.ChatCompletionRequest) (Stream, error) {
+	request.Stream = true
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return Stream{}, fmt.Errorf("encode request: %w", err)
+	}
+	endpointURL, err := client.endpointURL("chat/completions")
+	if err != nil {
+		return Stream{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+	if err != nil {
+		return Stream{}, fmt.Errorf("create request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Accept", "text/event-stream")
+	if client.APIKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+client.APIKey)
+	}
+	httpClient := client.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	response, err := httpClient.Do(httpRequest)
+	if err != nil {
+		return Stream{}, fmt.Errorf("send request: %w", err)
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return Stream{}, &APIError{StatusCode: response.StatusCode, Message: string(body)}
+	}
+	chunks := make(chan proxytpes.ChatCompletionChunk)
+	errors := make(chan error, 1)
+	go readStream(response.Body, chunks, errors)
+	return Stream{Chunks: chunks, Errors: errors}, nil
+}
+
+func readStream(body io.ReadCloser, chunks chan<- proxytpes.ChatCompletionChunk, errors chan<- error) {
+	defer body.Close()
+	defer close(chunks)
+	defer close(errors)
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			return
+		}
+		chunk := proxytpes.ChatCompletionChunk{}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			errors <- fmt.Errorf("decode stream chunk: %w", err)
+			return
+		}
+		chunks <- chunk
+	}
+	if err := scanner.Err(); err != nil {
+		errors <- fmt.Errorf("read stream: %w", err)
+	}
 }
 
 func (client Client) post(ctx context.Context, endpoint string, payload any, output any) error {

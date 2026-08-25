@@ -40,3 +40,28 @@ func TestCompletionReturnsAPIError(t *testing.T) {
 		t.Fatalf("error=%#v", err)
 	}
 }
+
+func TestCompletionStreamReadsOpenAISSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Accept") != "text/event-stream" {
+			t.Fatalf("accept = %q", request.Header.Get("Accept"))
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte("data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	stream, err := (Client{BaseURL: server.URL, HTTPClient: server.Client()}).CompletionStream(context.Background(), proxytpes.ChatCompletionRequest{Model: "gateway-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := <-stream.Chunks
+	if chunk.ID != "chunk-1" || chunk.Choices[0].Delta.Content != "hello" {
+		t.Fatalf("chunk = %#v", chunk)
+	}
+	if _, open := <-stream.Chunks; open {
+		t.Fatal("stream must close after [DONE]")
+	}
+	if err, open := <-stream.Errors; open || err != nil {
+		t.Fatalf("stream error = %v open=%t", err, open)
+	}
+}
