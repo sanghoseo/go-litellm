@@ -265,6 +265,14 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/realtime/client_secrets", server.realtimeClientSecrets)
 	mux.HandleFunc("POST /v1/realtime/calls", server.realtimeCalls)
 	mux.HandleFunc("POST /v1/realtime/transcription_sessions", server.realtimeTranscriptionSessions)
+	mux.HandleFunc("GET /v1/evals", server.evals)
+	mux.HandleFunc("POST /v1/evals", server.evals)
+	mux.HandleFunc("GET /v1/evals/{evalID}", server.eval)
+	mux.HandleFunc("POST /v1/evals/{evalID}", server.eval)
+	mux.HandleFunc("DELETE /v1/evals/{evalID}", server.eval)
+	mux.HandleFunc("POST /v1/evals/{evalID}/cancel", server.cancelEval)
+	mux.HandleFunc("GET /v1/evals/{evalID}/runs", server.evalRuns)
+	mux.HandleFunc("GET /v1/evals/{evalID}/runs/{runID}", server.evalRun)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -462,6 +470,21 @@ func (server Server) realtimeCalls(writer http.ResponseWriter, request *http.Req
 }
 func (server Server) realtimeTranscriptionSessions(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "realtime/transcription_sessions")
+}
+func (server Server) evals(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "evals")
+}
+func (server Server) eval(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "evals/"+request.PathValue("evalID"))
+}
+func (server Server) cancelEval(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "evals/"+request.PathValue("evalID")+"/cancel")
+}
+func (server Server) evalRuns(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "evals/"+request.PathValue("evalID")+"/runs")
+}
+func (server Server) evalRun(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "evals/"+request.PathValue("evalID")+"/runs/"+request.PathValue("runID"))
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
