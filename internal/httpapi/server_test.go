@@ -297,6 +297,20 @@ func TestChatCompletionsFallsBackAfterProviderError(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsFallsBackAfterProviderServerFailure(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://one.example"},
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://two.example"},
+	}}, fallbackServerFailureCompleter{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != `{"deployment":"two"}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestEmbeddingsFallsBackAfterProviderError(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
 		{Name: "embedding-model", Model: "openai/text-embedding", APIBase: "https://one.example"},
@@ -472,9 +486,18 @@ type deploymentCapturingCompleter struct {
 
 type fallbackChatCompleter struct{}
 
+type fallbackServerFailureCompleter struct{}
+
 func (fallbackChatCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
 	if deployment.APIBase == "https://one.example" {
 		return providers.Response{}, errors.New("first deployment failed")
+	}
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"deployment":"two"}`))}, nil
+}
+
+func (fallbackServerFailureCompleter) ChatCompletion(_ context.Context, deployment config.Model, _ []byte) (providers.Response, error) {
+	if deployment.APIBase == "https://one.example" {
+		return providers.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader(`{"error":"unavailable"}`))}, nil
 	}
 	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"deployment":"two"}`))}, nil
 }

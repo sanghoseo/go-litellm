@@ -643,8 +643,14 @@ func (server Server) completeModelWithFallback(ctx context.Context, modelName st
 	failed := []config.Model{}
 	for {
 		response, err := completer(ctx, deployment, body)
-		if err == nil {
+		if err == nil && response.StatusCode < http.StatusInternalServerError {
 			return response, nil
+		}
+		if err == nil {
+			err = fmt.Errorf("upstream returned status %d", response.StatusCode)
+		}
+		if response.Body != nil {
+			_ = response.Body.Close()
 		}
 		failed = append(failed, deployment)
 		if server.router == nil {
