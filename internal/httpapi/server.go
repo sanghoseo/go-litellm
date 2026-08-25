@@ -40,27 +40,28 @@ type ResponseCache interface {
 }
 
 type Server struct {
-	config          config.Config
-	chatCompleter   providers.ChatCompleter
-	textCompleter   providers.TextCompleter
-	responseMaker   providers.ResponseCreator
-	embedder        providers.Embedder
-	imageGenerator  providers.ImageGenerator
-	speechCreator   providers.SpeechCreator
-	moderator       providers.Moderator
-	reranker        providers.Reranker
-	passthrough     providers.PassthroughClient
-	keyValidator    VirtualKeyValidator
-	router          *routing.Router
-	usageRecorder   usage.Recorder
-	requestLimiter  RequestLimiter
-	readinessChecks []ReadinessCheck
-	responseCache   ResponseCache
-	metrics         *observability.Metrics
-	keyManager      auth.VirtualKeyManager
-	teamManager     auth.TeamManager
-	userManager     auth.UserManager
-	projectManager  auth.ProjectManager
+	config              config.Config
+	chatCompleter       providers.ChatCompleter
+	textCompleter       providers.TextCompleter
+	responseMaker       providers.ResponseCreator
+	embedder            providers.Embedder
+	imageGenerator      providers.ImageGenerator
+	speechCreator       providers.SpeechCreator
+	moderator           providers.Moderator
+	reranker            providers.Reranker
+	passthrough         providers.PassthroughClient
+	keyValidator        VirtualKeyValidator
+	router              *routing.Router
+	usageRecorder       usage.Recorder
+	requestLimiter      RequestLimiter
+	readinessChecks     []ReadinessCheck
+	responseCache       ResponseCache
+	metrics             *observability.Metrics
+	keyManager          auth.VirtualKeyManager
+	teamManager         auth.TeamManager
+	userManager         auth.UserManager
+	projectManager      auth.ProjectManager
+	organizationManager auth.OrganizationManager
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -85,6 +86,11 @@ func (server Server) WithUserManager(manager auth.UserManager) Server {
 
 func (server Server) WithProjectManager(manager auth.ProjectManager) Server {
 	server.projectManager = manager
+	return server
+}
+
+func (server Server) WithOrganizationManager(manager auth.OrganizationManager) Server {
+	server.organizationManager = manager
 	return server
 }
 

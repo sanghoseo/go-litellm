@@ -68,6 +68,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	var teamManager auth.TeamManager
 	var userManager auth.UserManager
 	var projectManager auth.ProjectManager
+	var organizationManager auth.OrganizationManager
 	var usageRecorder usage.Recorder
 	var requestLimiter httpapi.RequestLimiter
 	var responseCache httpapi.ResponseCache
@@ -92,6 +93,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		teamManager = postgres.NewTeamStore(database)
 		userManager = postgres.NewUserStore(database)
 		projectManager = postgres.NewProjectStore(database)
+		organizationManager = postgres.NewOrganizationStore(database)
 		usageRecorder = postgres.NewSpendLogStore(database)
 		readinessChecks = append(readinessChecks, database)
 	}
@@ -112,7 +114,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	providerRegistry := newProviderRegistry()
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithVirtualKeyManager(keyManager).WithTeamManager(teamManager).WithUserManager(userManager).WithProjectManager(projectManager).Handler(),
+		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithVirtualKeyManager(keyManager).WithTeamManager(teamManager).WithUserManager(userManager).WithProjectManager(projectManager).WithOrganizationManager(organizationManager).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
