@@ -235,6 +235,11 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/containers", server.containers)
 	mux.HandleFunc("GET /v1/containers/{containerID}", server.container)
 	mux.HandleFunc("DELETE /v1/containers/{containerID}", server.container)
+	mux.HandleFunc("GET /v1/containers/{containerID}/files", server.containerFiles)
+	mux.HandleFunc("POST /v1/containers/{containerID}/files", server.containerFiles)
+	mux.HandleFunc("GET /v1/containers/{containerID}/files/{fileID}", server.containerFile)
+	mux.HandleFunc("DELETE /v1/containers/{containerID}/files/{fileID}", server.containerFile)
+	mux.HandleFunc("GET /v1/containers/{containerID}/files/{fileID}/content", server.containerFileContent)
 	mux.HandleFunc("GET /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("POST /v1/vector_stores", server.vectorStores)
 	mux.HandleFunc("GET /v1/vector_stores/{vectorStoreID}", server.vectorStore)
@@ -375,6 +380,15 @@ func (server Server) containers(writer http.ResponseWriter, request *http.Reques
 }
 func (server Server) container(writer http.ResponseWriter, request *http.Request) {
 	server.forwardPassthrough(writer, request, "containers/"+request.PathValue("containerID"))
+}
+func (server Server) containerFiles(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "containers/"+request.PathValue("containerID")+"/files")
+}
+func (server Server) containerFile(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "containers/"+request.PathValue("containerID")+"/files/"+request.PathValue("fileID"))
+}
+func (server Server) containerFileContent(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "containers/"+request.PathValue("containerID")+"/files/"+request.PathValue("fileID")+"/content")
 }
 
 func (server Server) vectorStores(writer http.ResponseWriter, request *http.Request) {
