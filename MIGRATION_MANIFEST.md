@@ -16,7 +16,7 @@
 | E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis runtime 기반 이식 |
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | 대기 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/api/`, `internal/providers/` | 대기 |
-| H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | 진행 중 |
+| H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | 핵심 운영 DDL 이식 |
 | I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | 진행 중 |
 
 ## 완료 판정
