@@ -203,6 +203,22 @@ func TestChatCompletionsForwardsConfiguredDeployment(t *testing.T) {
 	}
 }
 
+func TestCompletionsForwardsConfiguredDeployment(t *testing.T) {
+	server := NewServer(
+		config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}},
+		mediaProvider{},
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/completions", strings.NewReader(`{"model":"gateway-model","prompt":"hello"}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || response.Body.String() != `{"choices":[{"text":"hello"}]}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestChatCompletionsRecordsUsage(t *testing.T) {
 	recorder := &recordingUsageRecorder{}
 	server := NewServerWithDependencies(
@@ -481,6 +497,9 @@ type mediaProvider struct{}
 
 func (mediaProvider) ChatCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
 	return providers.Response{}, errors.New("not used")
+}
+func (mediaProvider) TextCompletion(context.Context, config.Model, []byte) (providers.Response, error) {
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"choices":[{"text":"hello"}]}`))}, nil
 }
 func (mediaProvider) CreateResponse(context.Context, config.Model, []byte) (providers.Response, error) {
 	return providers.Response{}, errors.New("not used")

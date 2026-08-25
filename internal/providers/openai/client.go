@@ -29,6 +29,10 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	return client.request(ctx, deployment, body, "chat/completions")
 }
 
+func (client Client) TextCompletion(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
+	return client.request(ctx, deployment, body, "completions")
+}
+
 func (client Client) CreateResponse(ctx context.Context, deployment config.Model, body []byte) (providers.Response, error) {
 	return client.request(ctx, deployment, body, "responses")
 }

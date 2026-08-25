@@ -42,6 +42,7 @@ type ResponseCache interface {
 type Server struct {
 	config          config.Config
 	chatCompleter   providers.ChatCompleter
+	textCompleter   providers.TextCompleter
 	responseMaker   providers.ResponseCreator
 	embedder        providers.Embedder
 	imageGenerator  providers.ImageGenerator
@@ -96,6 +97,9 @@ func (server *Server) setOptionalCompleters(completer providers.ChatCompleter) {
 	if responseMaker, ok := completer.(providers.ResponseCreator); ok {
 		server.responseMaker = responseMaker
 	}
+	if textCompleter, ok := completer.(providers.TextCompleter); ok {
+		server.textCompleter = textCompleter
+	}
 	if embedder, ok := completer.(providers.Embedder); ok {
 		server.embedder = embedder
 	}
@@ -127,6 +131,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /key/list", server.listKeys)
 	mux.HandleFunc("POST /key/regenerate", server.regenerateKey)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
+	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	mux.HandleFunc("POST /v1/moderations", server.moderations)
@@ -619,6 +624,14 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		_ = server.responseCache.Set(request.Context(), cacheKey, responseBody.Bytes(), time.Minute)
 	}
 	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode)
+}
+
+func (server Server) completions(writer http.ResponseWriter, request *http.Request) {
+	if server.textCompleter == nil {
+		server.providerUnavailable(writer, "No text completion provider is configured")
+		return
+	}
+	server.forwardModelRequest(writer, request, server.textCompleter.TextCompletion)
 }
 
 func (server Server) completeModelWithFallback(ctx context.Context, modelName string, deployment config.Model, body []byte, completer modelRequestCompleter) (providers.Response, error) {

@@ -130,3 +130,19 @@ func TestModerateUsesOpenAIModerationsEndpoint(t *testing.T) {
 	}
 	defer response.Body.Close()
 }
+
+func TestTextCompletionUsesOpenAICompletionsEndpoint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/completions" {
+			t.Fatalf("path = %q", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).TextCompletion(context.Background(), config.Model{Model: "openai/gpt-5", APIBase: upstream.URL + "/v1"}, []byte(`{"model":"gateway-model","prompt":"hello"}`))
+	if err != nil {
+		t.Fatalf("TextCompletion() error = %v", err)
+	}
+	defer response.Body.Close()
+}
