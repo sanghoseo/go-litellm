@@ -382,6 +382,17 @@ func TestModelsAppliesAllVirtualKeyModelScopes(t *testing.T) {
 	}
 }
 
+func TestSpendLogsRequiresAdminAndReturnsLogs(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithSpendLogReader(memorySpendLogReader{logs: []usage.Log{{RequestID: "request-test", TotalTokens: 5}}})
+	request := httptest.NewRequest(http.MethodGet, "/spend/logs", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"request_id":"request-test"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestHealthDoesNotRequireAuthentication(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key"})
 	request := httptest.NewRequest(http.MethodGet, "/health/liveliness", nil)
@@ -1160,6 +1171,12 @@ type recordingUsageRecorder struct{ records []usage.Record }
 func (recorder *recordingUsageRecorder) Insert(_ context.Context, record usage.Record) error {
 	recorder.records = append(recorder.records, record)
 	return nil
+}
+
+type memorySpendLogReader struct{ logs []usage.Log }
+
+func (reader memorySpendLogReader) List(context.Context, int) ([]usage.Log, error) {
+	return reader.logs, nil
 }
 
 type limitedVirtualKeyValidator struct{ limit int64 }

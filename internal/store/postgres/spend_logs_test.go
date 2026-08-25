@@ -45,4 +45,8 @@ func TestSpendLogStoreInsertIsIdempotent(t *testing.T) {
 	if count != 1 || tokens != 5 {
 		t.Fatalf("count=%d tokens=%d", count, tokens)
 	}
+	logs, err := store.List(context.Background(), 10)
+	if err != nil || len(logs) != 1 || logs[0].RequestID != "request-1" {
+		t.Fatalf("logs=%#v err=%v", logs, err)
+	}
 }

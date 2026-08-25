@@ -54,6 +54,7 @@ type Server struct {
 	keyValidator        VirtualKeyValidator
 	router              *routing.Router
 	usageRecorder       usage.Recorder
+	spendLogReader      usage.LogReader
 	requestLimiter      RequestLimiter
 	readinessChecks     []ReadinessCheck
 	responseCache       ResponseCache
@@ -68,6 +69,11 @@ type Server struct {
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
 	server.responseCache = cache
+	return server
+}
+
+func (server Server) WithSpendLogReader(reader usage.LogReader) Server {
+	server.spendLogReader = reader
 	return server
 }
 
@@ -159,6 +165,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health/readiness", server.readiness)
 	mux.HandleFunc("GET /v1/models", server.models)
 	mux.HandleFunc("GET /v1/models/{modelID}", server.model)
+	mux.HandleFunc("GET /spend/logs", server.spendLogs)
 	mux.HandleFunc("POST /key/generate", server.generateKey)
 	mux.HandleFunc("GET /key/info", server.keyInfo)
 	mux.HandleFunc("POST /key/delete", server.deleteKey)
@@ -1541,6 +1548,19 @@ func (server Server) model(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, modelResponse{ID: modelID, Object: "model", Created: 0, OwnedBy: providerName(deployment.Model)})
+}
+
+func (server Server) spendLogs(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.spendLogReader == nil {
+		writeJSON(writer, 401, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	logs, err := server.spendLogReader.List(request.Context(), 100)
+	if err != nil {
+		writeJSON(writer, 500, openAIError{Message: "Could not list spend logs", Type: "server_error", Code: "spend_log_list_failed"})
+		return
+	}
+	writeJSON(writer, 200, logs)
 }
 
 func (server Server) authorize(request *http.Request, model string) (auth.VirtualKey, bool) {

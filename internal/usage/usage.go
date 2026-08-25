@@ -13,6 +13,22 @@ type Recorder interface {
 	Insert(context.Context, Record) error
 }
 
+type Log struct {
+	RequestID   string    `json:"request_id"`
+	CallType    string    `json:"call_type"`
+	APIKeyHash  string    `json:"api_key"`
+	TotalTokens int       `json:"total_tokens"`
+	Model       string    `json:"model"`
+	Provider    string    `json:"custom_llm_provider"`
+	StartedAt   time.Time `json:"start_time"`
+	CompletedAt time.Time `json:"end_time"`
+	Status      string    `json:"status"`
+}
+
+type LogReader interface {
+	List(context.Context, int) ([]Log, error)
+}
+
 type Record struct {
 	RequestID   string
 	CallType    string

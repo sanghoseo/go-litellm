@@ -71,6 +71,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	var organizationManager auth.OrganizationManager
 	var budgetManager auth.BudgetManager
 	var usageRecorder usage.Recorder
+	var spendLogReader usage.LogReader
 	var requestLimiter httpapi.RequestLimiter
 	var responseCache httpapi.ResponseCache
 	readinessChecks := []httpapi.ReadinessCheck{}
@@ -96,7 +97,9 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		projectManager = postgres.NewProjectStore(database)
 		organizationManager = postgres.NewOrganizationStore(database)
 		budgetManager = postgres.NewBudgetStore(database)
-		usageRecorder = postgres.NewSpendLogStore(database)
+		spendLogs := postgres.NewSpendLogStore(database)
+		usageRecorder = spendLogs
+		spendLogReader = spendLogs
 		readinessChecks = append(readinessChecks, database)
 	}
 	if proxyConfig.RedisURL != "" {
@@ -116,7 +119,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	providerRegistry := newProviderRegistry()
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithVirtualKeyManager(keyManager).WithTeamManager(teamManager).WithUserManager(userManager).WithProjectManager(projectManager).WithOrganizationManager(organizationManager).WithBudgetManager(budgetManager).Handler(),
+		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithSpendLogReader(spendLogReader).WithVirtualKeyManager(keyManager).WithTeamManager(teamManager).WithUserManager(userManager).WithProjectManager(projectManager).WithOrganizationManager(organizationManager).WithBudgetManager(budgetManager).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)
