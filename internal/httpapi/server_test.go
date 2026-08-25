@@ -131,6 +131,39 @@ func TestTeamManagementLifecycle(t *testing.T) {
 	}
 }
 
+func TestUserManagementLifecycle(t *testing.T) {
+	manager := &memoryUserManager{users: map[string]auth.ManagedUser{}}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithUserManager(manager)
+	create := httptest.NewRequest(http.MethodPost, "/user/new", strings.NewReader("{\"user_id\":\"user-test\",\"user_alias\":\"Developer\",\"team_id\":\"team-test\",\"user_email\":\"developer@example.com\",\"models\":[\"gateway-model\"]}"))
+	create.Header.Set("Authorization", "Bearer master-key")
+	created := httptest.NewRecorder()
+	server.Handler().ServeHTTP(created, create)
+	if created.Code != http.StatusOK || manager.users["user-test"].UserEmail != "developer@example.com" {
+		t.Fatalf("create status=%d users=%#v", created.Code, manager.users)
+	}
+	info := httptest.NewRequest(http.MethodGet, "/user/info?user_id=user-test", nil)
+	info.Header.Set("Authorization", "Bearer master-key")
+	infoResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(infoResponse, info)
+	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), "\"team_id\":\"team-test\"") {
+		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
+	}
+	block := httptest.NewRequest(http.MethodPost, "/user/block", strings.NewReader("{\"user_id\":\"user-test\"}"))
+	block.Header.Set("Authorization", "Bearer master-key")
+	blocked := httptest.NewRecorder()
+	server.Handler().ServeHTTP(blocked, block)
+	if blocked.Code != http.StatusOK || !manager.users["user-test"].Blocked {
+		t.Fatalf("block status=%d user=%#v", blocked.Code, manager.users["user-test"])
+	}
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/user/delete", strings.NewReader("{\"user_id\":\"user-test\"}"))
+	deleteRequest.Header.Set("Authorization", "Bearer master-key")
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK || len(manager.users) != 0 {
+		t.Fatalf("delete status=%d users=%#v", deleted.Code, manager.users)
+	}
+}
+
 func TestChatCompletionsAcceptsAllowedVirtualKey(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(
 		config.Config{Models: []config.Model{
@@ -495,6 +528,45 @@ type memoryKeyManager struct {
 
 type memoryTeamManager struct {
 	teams map[string]auth.ManagedTeam
+}
+
+type memoryUserManager struct {
+	users map[string]auth.ManagedUser
+}
+
+func (manager *memoryUserManager) CreateUser(_ context.Context, user auth.ManagedUser) error {
+	manager.users[user.UserID] = user
+	return nil
+}
+func (manager *memoryUserManager) GetUser(_ context.Context, userID string) (auth.ManagedUser, error) {
+	user, found := manager.users[userID]
+	if !found {
+		return auth.ManagedUser{}, auth.ErrInvalidVirtualKey
+	}
+	return user, nil
+}
+func (manager *memoryUserManager) ListUsers(_ context.Context, _ int) ([]auth.ManagedUser, error) {
+	users := make([]auth.ManagedUser, 0, len(manager.users))
+	for _, user := range manager.users {
+		users = append(users, user)
+	}
+	return users, nil
+}
+func (manager *memoryUserManager) SetUserBlocked(_ context.Context, userID string, blocked bool) (bool, error) {
+	user, found := manager.users[userID]
+	if !found {
+		return false, nil
+	}
+	user.Blocked = blocked
+	manager.users[userID] = user
+	return true, nil
+}
+func (manager *memoryUserManager) DeleteUser(_ context.Context, userID string) (bool, error) {
+	if _, found := manager.users[userID]; !found {
+		return false, nil
+	}
+	delete(manager.users, userID)
+	return true, nil
 }
 
 func (manager *memoryTeamManager) CreateTeam(_ context.Context, team auth.ManagedTeam) error {
