@@ -10,8 +10,8 @@
 | 단계 | 원본 영역 | Go 목적지 | 상태 |
 | --- | --- | --- | --- |
 | A | `litellm/_uuid.py`, `exceptions.py`, `_internal_context.py` | `litellm/` 공통 SDK | 부분 이식 |
-| B | `litellm/types/`, `types/` | `pkg/types/` | 핵심 OpenAI 타입 이식 |
-| C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 공개 Completion/Embedding/SSE SDK·router retry/alias 이식 |
+| B | `litellm/types/`, `types/` | `pkg/types/` | chat/embedding/responses 핵심 OpenAI 타입 이식 |
+| C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 공개 Completion/Embedding/Responses/SSE SDK·router retry/alias 이식 |
 | D | `litellm/llms/**`, provider transformations | `internal/providers/` | adapter registry·OpenAI·Azure·Anthropic chat/SSE·Gemini·Bedrock Converse chat 이식 |
 | E | `litellm/proxy/**` | `internal/httpapi/`, `internal/auth/`, `internal/store/` | PostgreSQL·Redis cache·usage/spend·RPM·readiness 이식 |
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | Prometheus HTTP metrics·request ID 전파 이식 |

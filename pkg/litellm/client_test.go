@@ -41,6 +41,20 @@ func TestCompletionReturnsAPIError(t *testing.T) {
 	}
 }
 
+func TestResponseUsesOpenAIResponsesContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %s", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{"id":"resp_1","object":"response","model":"gateway-model","output":[]}`))
+	}))
+	defer server.Close()
+	response, err := (Client{BaseURL: server.URL + "/v1", HTTPClient: server.Client()}).Response(context.Background(), proxytpes.ResponsesRequest{Model: "gateway-model", Input: json.RawMessage(`"hello"`)})
+	if err != nil || response.ID != "resp_1" {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+}
+
 func TestCompletionStreamReadsOpenAISSE(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Accept") != "text/event-stream" {

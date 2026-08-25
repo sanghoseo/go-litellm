@@ -50,6 +50,14 @@ func (client Client) Embedding(ctx context.Context, request proxytpes.EmbeddingR
 	return response, nil
 }
 
+func (client Client) Response(ctx context.Context, request proxytpes.ResponsesRequest) (proxytpes.ResponsesResponse, error) {
+	response := proxytpes.ResponsesResponse{}
+	if err := client.post(ctx, "responses", request, &response); err != nil {
+		return proxytpes.ResponsesResponse{}, err
+	}
+	return response, nil
+}
+
 func (client Client) CompletionStream(ctx context.Context, request proxytpes.ChatCompletionRequest) (Stream, error) {
 	request.Stream = true
 	encoded, err := json.Marshal(request)
