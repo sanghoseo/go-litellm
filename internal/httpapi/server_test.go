@@ -148,6 +148,13 @@ func TestUserManagementLifecycle(t *testing.T) {
 	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), "\"team_id\":\"team-test\"") {
 		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
 	}
+	update := httptest.NewRequest(http.MethodPost, "/user/update", strings.NewReader("{\"user_id\":\"user-test\",\"user_alias\":\"Updated\"}"))
+	update.Header.Set("Authorization", "Bearer master-key")
+	updated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || manager.users["user-test"].UserAlias != "Updated" {
+		t.Fatalf("update status=%d user=%#v", updated.Code, manager.users["user-test"])
+	}
 	block := httptest.NewRequest(http.MethodPost, "/user/block", strings.NewReader("{\"user_id\":\"user-test\"}"))
 	block.Header.Set("Authorization", "Bearer master-key")
 	blocked := httptest.NewRecorder()
@@ -642,6 +649,29 @@ func (manager *memoryUserManager) GetUser(_ context.Context, userID string) (aut
 		return auth.ManagedUser{}, auth.ErrInvalidVirtualKey
 	}
 	return user, nil
+}
+func (manager *memoryUserManager) UpdateUser(_ context.Context, userID string, update auth.ManagedUserUpdate) (bool, error) {
+	user, found := manager.users[userID]
+	if !found {
+		return false, nil
+	}
+	if update.UserAlias != nil {
+		user.UserAlias = *update.UserAlias
+	}
+	if update.TeamID != nil {
+		user.TeamID = *update.TeamID
+	}
+	if update.UserEmail != nil {
+		user.UserEmail = *update.UserEmail
+	}
+	if update.Models != nil {
+		user.Models = *update.Models
+	}
+	if update.Blocked != nil {
+		user.Blocked = *update.Blocked
+	}
+	manager.users[userID] = user
+	return true, nil
 }
 func (manager *memoryUserManager) ListUsers(_ context.Context, _ int) ([]auth.ManagedUser, error) {
 	users := make([]auth.ManagedUser, 0, len(manager.users))

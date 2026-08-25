@@ -40,6 +40,33 @@ func (store UserStore) GetUser(ctx context.Context, userID string) (auth.Managed
 	return user, nil
 }
 
+func (store UserStore) UpdateUser(ctx context.Context, userID string, update auth.ManagedUserUpdate) (bool, error) {
+	if store.pool == nil {
+		return false, auth.ErrInvalidVirtualKey
+	}
+	var alias, teamID, email, models, blocked any
+	if update.UserAlias != nil {
+		alias = *update.UserAlias
+	}
+	if update.TeamID != nil {
+		teamID = *update.TeamID
+	}
+	if update.UserEmail != nil {
+		email = *update.UserEmail
+	}
+	if update.Models != nil {
+		models = nonNilStringSlice(*update.Models)
+	}
+	if update.Blocked != nil {
+		blocked = *update.Blocked
+	}
+	result, err := store.pool.Exec(ctx, "UPDATE \"LiteLLM_UserTable\" SET \"user_alias\" = COALESCE($2, \"user_alias\"), \"team_id\" = COALESCE($3, \"team_id\"), \"user_email\" = COALESCE($4, \"user_email\"), \"models\" = COALESCE($5, \"models\"), \"blocked\" = COALESCE($6, \"blocked\"), \"updated_at\" = NOW() WHERE \"user_id\" = $1", userID, alias, teamID, email, models, blocked)
+	if err != nil {
+		return false, fmt.Errorf("update user: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
 func (store UserStore) ListUsers(ctx context.Context, limit int) ([]auth.ManagedUser, error) {
 	if store.pool == nil {
 		return nil, auth.ErrInvalidVirtualKey

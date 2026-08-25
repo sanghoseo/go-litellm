@@ -36,6 +36,16 @@ func TestUserStoreLifecycle(t *testing.T) {
 	if err != nil || loaded.UserAlias != user.UserAlias || loaded.TeamID != user.TeamID || loaded.UserEmail != user.UserEmail || len(loaded.Models) != 1 {
 		t.Fatalf("user=%#v err=%v", loaded, err)
 	}
+	alias := "Updated"
+	models := []string{"other-model"}
+	updated, err := store.UpdateUser(context.Background(), user.UserID, auth.ManagedUserUpdate{UserAlias: &alias, Models: &models})
+	if err != nil || !updated {
+		t.Fatalf("updated=%t err=%v", updated, err)
+	}
+	loaded, err = store.GetUser(context.Background(), user.UserID)
+	if err != nil || loaded.UserAlias != alias || len(loaded.Models) != 1 || loaded.Models[0] != models[0] {
+		t.Fatalf("updated user=%#v err=%v", loaded, err)
+	}
 	users, err := store.ListUsers(context.Background(), 10)
 	if err != nil || len(users) != 1 || users[0].UserID != user.UserID {
 		t.Fatalf("users=%#v err=%v", users, err)

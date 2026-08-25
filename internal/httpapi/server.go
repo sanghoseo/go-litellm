@@ -162,6 +162,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /user/new", server.createUser)
 	mux.HandleFunc("GET /user/info", server.userInfo)
 	mux.HandleFunc("GET /user/list", server.listUsers)
+	mux.HandleFunc("POST /user/update", server.updateUser)
 	mux.HandleFunc("POST /user/block", server.blockUser)
 	mux.HandleFunc("POST /user/unblock", server.unblockUser)
 	mux.HandleFunc("POST /user/delete", server.deleteUser)
@@ -732,6 +733,15 @@ type userResponse struct {
 	Blocked   bool     `json:"blocked"`
 }
 
+type userUpdateRequest struct {
+	UserID    string    `json:"user_id"`
+	UserAlias *string   `json:"user_alias"`
+	TeamID    *string   `json:"team_id"`
+	UserEmail *string   `json:"user_email"`
+	Models    *[]string `json:"models"`
+	Blocked   *bool     `json:"blocked"`
+}
+
 func (server Server) createUser(writer http.ResponseWriter, request *http.Request) {
 	if !server.authorizeAdmin(request) || server.userManager == nil {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
@@ -791,6 +801,33 @@ func (server Server) listUsers(writer http.ResponseWriter, request *http.Request
 		response = append(response, userResponseFrom(user))
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+}
+
+func (server Server) updateUser(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.userManager == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	var input userUpdateRequest
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.UserID == "" {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'user_id'", Type: "invalid_request_error", Code: "invalid_request"})
+		return
+	}
+	updated, err := server.userManager.UpdateUser(request.Context(), input.UserID, auth.ManagedUserUpdate{UserAlias: input.UserAlias, TeamID: input.TeamID, UserEmail: input.UserEmail, Models: input.Models, Blocked: input.Blocked})
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not update user", Type: "server_error", Code: "user_update_failed"})
+		return
+	}
+	if !updated {
+		writeJSON(writer, http.StatusNotFound, openAIError{Message: "User not found", Type: "invalid_request_error", Code: "user_not_found"})
+		return
+	}
+	user, err := server.userManager.GetUser(request.Context(), input.UserID)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not read updated user", Type: "server_error", Code: "user_update_failed"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, userResponseFrom(user))
 }
 
 func (server Server) blockUser(writer http.ResponseWriter, request *http.Request) {
