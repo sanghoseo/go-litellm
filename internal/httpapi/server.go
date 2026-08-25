@@ -208,6 +208,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
+	mux.HandleFunc("GET /v1/responses/{responseID}/input_items", server.responseInputItems)
 	mux.HandleFunc("POST /v1/embeddings", server.embeddings)
 	mux.HandleFunc("POST /v1/moderations", server.moderations)
 	mux.HandleFunc("POST /v1/rerank", server.rerank)
@@ -326,6 +327,10 @@ func (server Server) responses(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	server.forwardModelRequest(writer, request, "responses", server.responseMaker.CreateResponse)
+}
+
+func (server Server) responseInputItems(writer http.ResponseWriter, request *http.Request) {
+	server.forwardPassthrough(writer, request, "responses/"+request.PathValue("responseID")+"/input_items")
 }
 
 func (server Server) embeddings(writer http.ResponseWriter, request *http.Request) {

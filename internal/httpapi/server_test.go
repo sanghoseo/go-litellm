@@ -733,6 +733,7 @@ func TestFilesAndBatchesUseConfiguredDefaultDeployment(t *testing.T) {
 		{http.MethodPost, "/v1/audio/translations", "audio/translations"},
 		{http.MethodPost, "/v1/images/edits", "images/edits"},
 		{http.MethodPost, "/v1/images/variations", "images/variations"},
+		{http.MethodGet, "/v1/responses/response-123/input_items", "responses/response-123/input_items"},
 		{http.MethodPost, "/v1/vector_stores", "vector_stores"},
 		{http.MethodPost, "/v1/vector_stores/vs-123/search", "vector_stores/vs-123/search"},
 		{http.MethodPost, "/v1/vector_stores/vs-123/files", "vector_stores/vs-123/files"},
