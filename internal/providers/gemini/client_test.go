@@ -98,3 +98,23 @@ func TestChatCompletionConvertsGeminiStream(t *testing.T) {
 		t.Fatalf("stream = %s", stream)
 	}
 }
+
+func TestChatCompletionConvertsGeminiTools(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		if !strings.Contains(string(body), `"functionDeclarations"`) || !strings.Contains(string(body), `"name":"weather"`) {
+			t.Fatalf("tools = %s", body)
+		}
+		_, _ = writer.Write([]byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"weather","args":{"city":"Seoul"}}}]},"finishReason":"STOP"}]}`))
+	}))
+	defer upstream.Close()
+	response, err := NewClient(upstream.Client()).ChatCompletion(context.Background(), config.Model{Model: "gemini/gemini-test", APIBase: upstream.URL + "/v1beta"}, []byte(`{"model":"gateway","messages":[{"role":"user","content":"weather"}],"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	converted, _ := io.ReadAll(response.Body)
+	if !strings.Contains(string(converted), `"finish_reason":"tool_calls"`) || !strings.Contains(string(converted), `"name":"weather"`) || !strings.Contains(string(converted), `"arguments":"{\"city\":\"Seoul\"}"`) {
+		t.Fatalf("converted = %s", converted)
+	}
+}

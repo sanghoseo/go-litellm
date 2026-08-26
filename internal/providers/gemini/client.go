@@ -238,7 +238,8 @@ func generateContentRequest(body []byte) ([]byte, error) {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
-		Temperature *float64 `json:"temperature"`
+		Temperature *float64        `json:"temperature"`
+		Tools       json.RawMessage `json:"tools"`
 	}
 	if err := json.Unmarshal(body, &request); err != nil {
 		return nil, fmt.Errorf("decode chat completion request: %w", err)
@@ -274,7 +275,43 @@ func generateContentRequest(body []byte) ([]byte, error) {
 	if request.Temperature != nil {
 		payload["generationConfig"] = map[string]any{"temperature": *request.Temperature}
 	}
+	if len(request.Tools) > 0 {
+		tools, err := geminiTools(request.Tools)
+		if err != nil {
+			return nil, err
+		}
+		payload["tools"] = []any{map[string]any{"functionDeclarations": tools}}
+	}
 	return json.Marshal(payload)
+}
+
+func geminiTools(rawTools json.RawMessage) ([]map[string]any, error) {
+	var tools []struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Parameters  json.RawMessage `json:"parameters"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rawTools, &tools); err != nil {
+		return nil, fmt.Errorf("decode OpenAI tools: %w", err)
+	}
+	declarations := make([]map[string]any, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type != "function" || tool.Function.Name == "" {
+			continue
+		}
+		declaration := map[string]any{"name": tool.Function.Name}
+		if tool.Function.Description != "" {
+			declaration["description"] = tool.Function.Description
+		}
+		if len(tool.Function.Parameters) > 0 {
+			declaration["parameters"] = tool.Function.Parameters
+		}
+		declarations = append(declarations, declaration)
+	}
+	return declarations, nil
 }
 
 func chatCompletionResponse(body io.Reader, configuredModel string) ([]byte, error) {
@@ -282,7 +319,11 @@ func chatCompletionResponse(body io.Reader, configuredModel string) ([]byte, err
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text         string `json:"text"`
+					FunctionCall struct {
+						Name string          `json:"name"`
+						Args json.RawMessage `json:"args"`
+					} `json:"functionCall"`
 				} `json:"parts"`
 			} `json:"content"`
 			FinishReason string `json:"finishReason"`
@@ -301,14 +342,34 @@ func chatCompletionResponse(body io.Reader, configuredModel string) ([]byte, err
 	}
 	parts := response.Candidates[0].Content.Parts
 	text := make([]string, 0, len(parts))
+	toolCalls := make([]map[string]any, 0)
 	for _, part := range parts {
 		text = append(text, part.Text)
+		if part.FunctionCall.Name != "" {
+			arguments := part.FunctionCall.Args
+			if len(arguments) == 0 {
+				arguments = json.RawMessage(`{}`)
+			}
+			toolCalls = append(toolCalls, map[string]any{"id": "call_" + part.FunctionCall.Name, "type": "function", "function": map[string]any{"name": part.FunctionCall.Name, "arguments": string(arguments)}})
+		}
 	}
 	content, _ := json.Marshal(strings.Join(text, ""))
 	finishReason := strings.ToLower(response.Candidates[0].FinishReason)
 	if finishReason == "stop" {
 		finishReason = "stop"
 	}
+	message := proxytpes.Message{Role: "assistant", Content: content}
+	if len(toolCalls) > 0 {
+		encoded, err := json.Marshal(toolCalls)
+		if err != nil {
+			return nil, fmt.Errorf("encode Gemini tool calls: %w", err)
+		}
+		message.ToolCalls = encoded
+		if len(text) == 0 {
+			message.Content = nil
+		}
+		finishReason = "tool_calls"
+	}
 	model := strings.TrimPrefix(configuredModel, "gemini/")
-	return json.Marshal(proxytpes.ChatCompletionResponse{ID: "chatcmpl-gemini", Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []proxytpes.ChatChoice{{Index: 0, Message: proxytpes.Message{Role: "assistant", Content: content}, FinishReason: &finishReason}}, Usage: &proxytpes.Usage{PromptTokens: response.Usage.Prompt, CompletionTokens: response.Usage.Completion, TotalTokens: response.Usage.Total}})
+	return json.Marshal(proxytpes.ChatCompletionResponse{ID: "chatcmpl-gemini", Object: "chat.completion", Created: time.Now().Unix(), Model: model, Choices: []proxytpes.ChatChoice{{Index: 0, Message: message, FinishReason: &finishReason}}, Usage: &proxytpes.Usage{PromptTokens: response.Usage.Prompt, CompletionTokens: response.Usage.Completion, TotalTokens: response.Usage.Total}})
 }
