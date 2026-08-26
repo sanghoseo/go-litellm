@@ -30,3 +30,7 @@
 - `--local-dev`(embedded PostgreSQL + miniredis) 기동·인증·모델 조회 E2E 통과.
 - Docker 컨테이너 배포 검증: distroless 이미지에 Python 런타임(`/python`, `/uvicorn`)이 없고, 외부 PostgreSQL·Redis에 연결해 `/health/readiness` 200·`/v1/models` 200 반환.
 - SSE 스트리밍 응답의 usage/cost 기록 지원(최종 chunk의 `usage` 파싱).
+- Python-Go contract 비교(실 Python proxy 대비, 동일 fixture):
+  - 에러 envelope `{"error":{...}}`, 상태 코드(401/403/400), 인증→모델 접근(403 `key_model_access_denied`)→모델 존재 순서 일치.
+  - proxy 인증 실패의 `type`/`code`는 OpenAI 표준(`invalid_api_key`)을 유지. 이 repo의 Go SDK client contract test가 같은 값을 검증.
+  - upstream 401은 provider 응답을 그대로 전파(OpenAI SDK가 받는 형태와 동일).
