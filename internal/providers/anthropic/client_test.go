@@ -93,3 +93,13 @@ func TestChatCompletionConvertsTools(t *testing.T) {
 		t.Fatalf("converted = %s", converted)
 	}
 }
+
+func TestMessagesRequestConvertsToolRoundTrip(t *testing.T) {
+	converted, err := messagesRequest([]byte(`{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Seoul\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"sunny"}]}`), "anthropic/claude-test")
+	if err != nil {
+		t.Fatalf("messagesRequest() error = %v", err)
+	}
+	if !strings.Contains(string(converted), `"type":"tool_use"`) || !strings.Contains(string(converted), `"input":{"city":"Seoul"}`) || !strings.Contains(string(converted), `"type":"tool_result"`) || !strings.Contains(string(converted), `"tool_use_id":"call_1"`) || strings.Contains(string(converted), `"tool_calls"`) {
+		t.Fatalf("converted request = %s", converted)
+	}
+}

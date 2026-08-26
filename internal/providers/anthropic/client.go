@@ -180,7 +180,11 @@ func messagesRequest(body []byte, configuredModel string) ([]byte, error) {
 			}
 			continue
 		}
-		filtered = append(filtered, message)
+		translated, err := translateMessage(message, role)
+		if err != nil {
+			return nil, err
+		}
+		filtered = append(filtered, translated)
 	}
 	payload["messages"], _ = json.Marshal(filtered)
 	if err := translateTools(payload); err != nil {
@@ -188,6 +192,60 @@ func messagesRequest(body []byte, configuredModel string) ([]byte, error) {
 	}
 	delete(payload, "stream_options")
 	return json.Marshal(payload)
+}
+
+func translateMessage(message map[string]json.RawMessage, role string) (map[string]json.RawMessage, error) {
+	if role == "tool" {
+		var toolCallID, content string
+		if err := json.Unmarshal(message["tool_call_id"], &toolCallID); err != nil || toolCallID == "" {
+			return nil, fmt.Errorf("Anthropic tool result is missing tool_call_id")
+		}
+		if rawContent := message["content"]; len(rawContent) > 0 {
+			if json.Unmarshal(rawContent, &content) != nil {
+				content = string(rawContent)
+			}
+		}
+		encodedContent, err := json.Marshal([]map[string]string{{"type": "tool_result", "tool_use_id": toolCallID, "content": content}})
+		if err != nil {
+			return nil, fmt.Errorf("encode Anthropic tool result: %w", err)
+		}
+		return map[string]json.RawMessage{"role": json.RawMessage(`"user"`), "content": encodedContent}, nil
+	}
+	if role != "assistant" || len(message["tool_calls"]) == 0 {
+		return message, nil
+	}
+	var calls []struct {
+		ID       string `json:"id"`
+		Type     string `json:"type"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(message["tool_calls"], &calls); err != nil {
+		return nil, fmt.Errorf("decode OpenAI tool calls: %w", err)
+	}
+	blocks := make([]map[string]any, 0, len(calls)+1)
+	var text string
+	_ = json.Unmarshal(message["content"], &text)
+	if text != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": text})
+	}
+	for _, call := range calls {
+		if call.Type != "function" || call.ID == "" || call.Function.Name == "" {
+			continue
+		}
+		input := json.RawMessage(call.Function.Arguments)
+		if !json.Valid(input) {
+			return nil, fmt.Errorf("decode OpenAI tool arguments for %q", call.Function.Name)
+		}
+		blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})
+	}
+	encodedBlocks, err := json.Marshal(blocks)
+	if err != nil {
+		return nil, fmt.Errorf("encode Anthropic tool use: %w", err)
+	}
+	return map[string]json.RawMessage{"role": json.RawMessage(`"assistant"`), "content": encodedBlocks}, nil
 }
 
 func translateTools(payload map[string]json.RawMessage) error {
