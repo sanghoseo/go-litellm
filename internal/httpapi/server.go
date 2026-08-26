@@ -65,6 +65,8 @@ type Server struct {
 	projectManager      auth.ProjectManager
 	organizationManager auth.OrganizationManager
 	budgetManager       auth.BudgetManager
+	budgetEnforcer      *BudgetEnforcer
+	costCalculator      usage.CostCalculator
 }
 
 func (server Server) WithResponseCache(cache ResponseCache) Server {
@@ -107,12 +109,17 @@ func (server Server) WithBudgetManager(manager auth.BudgetManager) Server {
 	return server
 }
 
+func (server Server) WithBudgetEnforcer(enforcer *BudgetEnforcer) Server {
+	server.budgetEnforcer = enforcer
+	return server
+}
+
 func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter) Server {
 	var chatCompleter providers.ChatCompleter
 	if len(completers) > 0 {
 		chatCompleter = completers[0]
 	}
-	server := Server{config: proxyConfig, chatCompleter: chatCompleter, metrics: observability.NewMetrics(), router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
+	server := Server{config: proxyConfig, chatCompleter: chatCompleter, metrics: observability.NewMetrics(), router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases), costCalculator: usage.NewCostCalculator()}
 	server.setOptionalCompleters(chatCompleter)
 	return server
 }
@@ -1480,6 +1487,10 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
+	if budgetErr := server.authorizeBudget(request.Context(), virtualKey, modelName); budgetErr != nil {
+		writeBudgetError(writer, budgetErr)
+		return
+	}
 	startedAt := time.Now().UTC()
 	upstream, err := server.completeModelWithFallback(request.Context(), modelName, deployment, body, completer)
 	if err != nil {
@@ -1491,7 +1502,7 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 	writer.WriteHeader(upstream.StatusCode)
 	responseBody := bytes.Buffer{}
 	_ = copyResponse(writer, io.TeeReader(upstream.Body, &responseBody))
-	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode, callType)
+	server.recordUsage(request.Context(), virtualKey, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode, callType)
 }
 
 func (server Server) allowedByRateLimit(ctx context.Context, virtualKey auth.VirtualKey, modelName string) bool {
@@ -1500,6 +1511,22 @@ func (server Server) allowedByRateLimit(ctx context.Context, virtualKey auth.Vir
 	}
 	allowed, err := server.requestLimiter.Allow(ctx, "litellm:rpm:"+virtualKey.TokenHash+":"+modelName, *virtualKey.RPMLimit, time.Minute)
 	return err == nil && allowed
+}
+
+func (server Server) authorizeBudget(ctx context.Context, virtualKey auth.VirtualKey, modelName string) error {
+	if server.budgetEnforcer == nil || virtualKey.TokenHash == "" || virtualKey.BudgetID == "" {
+		return nil
+	}
+	return server.budgetEnforcer.Authorize(ctx, virtualKey.TokenHash, virtualKey.BudgetID, modelName)
+}
+
+func writeBudgetError(writer http.ResponseWriter, err error) {
+	var exceeded *BudgetExceededError
+	if errors.As(err, &exceeded) {
+		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: exceeded.Error(), Type: "budget_exceeded", Code: "budget_exceeded"})
+		return
+	}
+	writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Budget has been exceeded", Type: "budget_exceeded", Code: "budget_exceeded"})
 }
 
 func (server Server) providerUnavailable(writer http.ResponseWriter, message string) {
@@ -1536,6 +1563,10 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusTooManyRequests, openAIError{Message: "Rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"})
 		return
 	}
+	if budgetErr := server.authorizeBudget(request.Context(), virtualKey, modelName); budgetErr != nil {
+		writeBudgetError(writer, budgetErr)
+		return
+	}
 	cacheKey := server.cacheKey(body, virtualKey.TokenHash)
 	if cacheKey != "" {
 		if cached, err := server.responseCache.Get(request.Context(), cacheKey); err == nil {
@@ -1562,7 +1593,7 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	if cacheKey != "" && upstream.StatusCode >= http.StatusOK && upstream.StatusCode < http.StatusMultipleChoices {
 		_ = server.responseCache.Set(request.Context(), cacheKey, responseBody.Bytes(), time.Minute)
 	}
-	server.recordUsage(request.Context(), virtualKey.TokenHash, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode, "chat_completion")
+	server.recordUsage(request.Context(), virtualKey, deployment, responseBody.Bytes(), startedAt, upstream.StatusCode, "chat_completion")
 }
 
 func (server Server) completions(writer http.ResponseWriter, request *http.Request) {
@@ -1613,7 +1644,7 @@ func isStreamingRequest(body []byte) bool {
 	return json.Unmarshal(body, &payload) == nil && payload.Stream
 }
 
-func (server Server) recordUsage(ctx context.Context, keyHash string, deployment config.Model, body []byte, startedAt time.Time, statusCode int, callType string) {
+func (server Server) recordUsage(ctx context.Context, virtualKey auth.VirtualKey, deployment config.Model, body []byte, startedAt time.Time, statusCode int, callType string) {
 	if server.usageRecorder == nil {
 		return
 	}
@@ -1626,7 +1657,11 @@ func (server Server) recordUsage(ctx context.Context, keyHash string, deployment
 		return
 	}
 	provider, _, _ := strings.Cut(deployment.Model, "/")
-	_ = server.usageRecorder.Insert(ctx, usage.Record{RequestID: requestID, CallType: callType, APIKeyHash: keyHash, Model: deployment.Name, Provider: provider, APIBase: deployment.APIBase, StartedAt: startedAt, CompletedAt: time.Now().UTC(), Usage: responseUsage, Status: http.StatusText(statusCode)})
+	cost := server.costCalculator.Lookup(deployment.Model).Total(responseUsage)
+	_ = server.usageRecorder.Insert(ctx, usage.Record{RequestID: requestID, CallType: callType, APIKeyHash: virtualKey.TokenHash, Model: deployment.Name, Provider: provider, APIBase: deployment.APIBase, StartedAt: startedAt, CompletedAt: time.Now().UTC(), Usage: responseUsage, Status: http.StatusText(statusCode), Cost: cost})
+	if virtualKey.BudgetID != "" {
+		server.budgetEnforcer.RecordSpend(ctx, virtualKey.TokenHash, virtualKey.BudgetID, cost)
+	}
 }
 
 func requestedModel(body []byte) (string, error) {

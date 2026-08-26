@@ -40,6 +40,7 @@ type Record struct {
 	CompletedAt time.Time
 	Usage       proxytpes.Usage
 	Status      string
+	Cost        float64
 }
 
 func UsageFromOpenAIResponse(body []byte) (proxytpes.Usage, error) {

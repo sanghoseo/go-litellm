@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
+	redisstore "github.com/BerriAI/litellm/go-proxy/internal/store/redis"
 	"github.com/BerriAI/litellm/go-proxy/internal/usage"
 )
 
@@ -1310,4 +1313,99 @@ func (stubChatCompleter) ChatCompletion(_ context.Context, deployment config.Mod
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl-test"}`)),
 	}, nil
+}
+
+type budgetedVirtualKeyValidator struct{ budgetID string }
+
+func (validator budgetedVirtualKeyValidator) Validate(_ context.Context, _ string, _ string) (auth.VirtualKey, error) {
+	return auth.VirtualKey{TokenHash: "key-hash", BudgetID: validator.budgetID, Models: []string{"gateway-model"}}, nil
+}
+
+type memorySpendCounter struct{ values map[string][]byte }
+
+func (counter *memorySpendCounter) Get(_ context.Context, key string) ([]byte, error) {
+	value, found := counter.values[key]
+	if !found {
+		return nil, redisstore.ErrCacheMiss
+	}
+	return value, nil
+}
+func (counter *memorySpendCounter) IncrByFloat(_ context.Context, key string, amount float64) (float64, error) {
+	total := 0.0
+	if raw, found := counter.values[key]; found {
+		total, _ = strconv.ParseFloat(string(raw), 64)
+	}
+	total += amount
+	counter.values[key] = []byte(strconv.FormatFloat(total, 'f', -1, 64))
+	return total, nil
+}
+func (counter *memorySpendCounter) Set(_ context.Context, key string, value []byte, _ time.Duration) error {
+	counter.values[key] = value
+	return nil
+}
+
+func budgetedBudgetManager(maxBudget float64) *memoryBudgetManager {
+	manager := &memoryBudgetManager{budgets: map[string]auth.ManagedBudget{}}
+	manager.CreateBudget(context.Background(), auth.ManagedBudget{BudgetID: "budget-1", MaxBudget: &maxBudget})
+	return manager
+}
+
+func TestChatCompletionsEnforcesBudgetExceeded(t *testing.T) {
+	counter := &memorySpendCounter{values: map[string][]byte{"spend:key:key-hash": []byte("10")}}
+	server := NewServerWithRuntime(
+		config.Config{Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-4o-mini"}}},
+		usageChatCompleter{}, budgetedVirtualKeyValidator{budgetID: "budget-1"}, nil, nil,
+	).WithBudgetEnforcer(NewBudgetEnforcer(counter, nil, budgetedBudgetManager(5), nil))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusTooManyRequests)
+	}
+	if !strings.Contains(response.Body.String(), `"type":"budget_exceeded"`) || !strings.Contains(response.Body.String(), "Current cost: 10") {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestChatCompletionsRecordsCostAndSpendWithinBudget(t *testing.T) {
+	counter := &memorySpendCounter{values: map[string][]byte{}}
+	recorder := &recordingUsageRecorder{}
+	server := NewServerWithRuntime(
+		config.Config{Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-4o-mini"}}},
+		usageChatCompleter{}, budgetedVirtualKeyValidator{budgetID: "budget-1"}, recorder, nil,
+	).WithBudgetEnforcer(NewBudgetEnforcer(counter, nil, budgetedBudgetManager(5), nil))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if len(recorder.records) != 1 {
+		t.Fatalf("records = %#v", recorder.records)
+	}
+	want := 2*1.5e-07 + 3*6e-07
+	if math.Abs(recorder.records[0].Cost-want) > 1e-18 {
+		t.Fatalf("recorded cost = %v, want %v", recorder.records[0].Cost, want)
+	}
+	spent, err := strconv.ParseFloat(string(counter.values["spend:key:key-hash"]), 64)
+	if err != nil || math.Abs(spent-want) > 1e-18 {
+		t.Fatalf("counter spend = %v, want %v", spent, want)
+	}
+}
+
+func TestChatCompletionsWithoutBudgetIsNotEnforced(t *testing.T) {
+	counter := &memorySpendCounter{values: map[string][]byte{"spend:key:key-hash": []byte("1000")}}
+	server := NewServerWithRuntime(
+		config.Config{Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-4o-mini"}}},
+		usageChatCompleter{}, budgetedVirtualKeyValidator{budgetID: ""}, nil, nil,
+	).WithBudgetEnforcer(NewBudgetEnforcer(counter, nil, budgetedBudgetManager(5), nil))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
 }

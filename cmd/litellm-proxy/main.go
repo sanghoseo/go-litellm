@@ -64,6 +64,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	}
 
 	var database *pgxpool.Pool
+	var redisClient *redisstore.Client
 	var keyValidator httpapi.VirtualKeyValidator
 	var keyManager auth.VirtualKeyManager
 	var teamManager auth.TeamManager
@@ -71,6 +72,7 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	var projectManager auth.ProjectManager
 	var organizationManager auth.OrganizationManager
 	var budgetManager auth.BudgetManager
+	var budgetSpendStore httpapi.SpendSince
 	var usageRecorder usage.Recorder
 	var spendLogReader usage.LogReader
 	var requestLimiter httpapi.RequestLimiter
@@ -97,14 +99,16 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 		userManager = postgres.NewUserStore(database)
 		projectManager = postgres.NewProjectStore(database)
 		organizationManager = postgres.NewOrganizationStore(database)
-		budgetManager = postgres.NewBudgetStore(database)
+		budgetStore := postgres.NewBudgetStore(database)
+		budgetManager = budgetStore
+		budgetSpendStore = budgetStore
 		spendLogs := postgres.NewSpendLogStore(database)
 		usageRecorder = spendLogs
 		spendLogReader = spendLogs
 		readinessChecks = append(readinessChecks, database)
 	}
 	if proxyConfig.RedisURL != "" {
-		redisClient, err := redisstore.New(proxyConfig.RedisURL)
+		redisClient, err = redisstore.New(proxyConfig.RedisURL)
 		if err != nil {
 			return fmt.Errorf("connect Redis: %w", err)
 		}
@@ -118,9 +122,13 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	}
 
 	providerRegistry := newProviderRegistry()
+	var budgetEnforcer *httpapi.BudgetEnforcer
+	if redisClient != nil && budgetManager != nil {
+		budgetEnforcer = httpapi.NewBudgetEnforcer(redisClient, requestLimiter, budgetManager, budgetSpendStore)
+	}
 	server := &http.Server{
 		Addr:              listenAddress,
-		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithSpendLogReader(spendLogReader).WithVirtualKeyManager(keyManager).WithTeamManager(teamManager).WithUserManager(userManager).WithProjectManager(projectManager).WithOrganizationManager(organizationManager).WithBudgetManager(budgetManager).Handler(),
+		Handler:           httpapi.NewServerWithRuntime(proxyConfig, providerRegistry, keyValidator, usageRecorder, requestLimiter, readinessChecks...).WithResponseCache(responseCache).WithSpendLogReader(spendLogReader).WithVirtualKeyManager(keyManager).WithTeamManager(teamManager).WithUserManager(userManager).WithProjectManager(projectManager).WithOrganizationManager(organizationManager).WithBudgetManager(budgetManager).WithBudgetEnforcer(budgetEnforcer).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	serverErrors := make(chan error, 1)

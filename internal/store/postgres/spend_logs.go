@@ -18,11 +18,11 @@ func (store SpendLogStore) Insert(ctx context.Context, record usage.Record) erro
 	}
 	_, err := store.pool.Exec(ctx, `
 INSERT INTO "LiteLLM_SpendLogs" (
-"request_id", "call_type", "api_key", "total_tokens", "prompt_tokens", "completion_tokens",
+"request_id", "call_type", "api_key", "spend", "total_tokens", "prompt_tokens", "completion_tokens",
 "startTime", "endTime", "request_duration_ms", "model", "custom_llm_provider", "api_base", "status")
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 ON CONFLICT ("request_id") DO NOTHING`,
-		record.RequestID, record.CallType, record.APIKeyHash, record.Usage.TotalTokens, record.Usage.PromptTokens, record.Usage.CompletionTokens,
+		record.RequestID, record.CallType, record.APIKeyHash, record.Cost, record.Usage.TotalTokens, record.Usage.PromptTokens, record.Usage.CompletionTokens,
 		record.StartedAt, record.CompletedAt, int(record.CompletedAt.Sub(record.StartedAt).Milliseconds()), record.Model, record.Provider, record.APIBase, record.Status)
 	if err != nil {
 		return fmt.Errorf("insert spend log: %w", err)

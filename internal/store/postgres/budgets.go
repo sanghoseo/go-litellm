@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/jackc/pgx/v5"
@@ -86,4 +87,16 @@ func (store BudgetStore) DeleteBudget(ctx context.Context, budgetID string) (boo
 		return false, fmt.Errorf("delete budget: %w", err)
 	}
 	return result.RowsAffected() > 0, nil
+}
+
+func (store BudgetStore) SpendSince(ctx context.Context, keyHash string, since time.Time) (float64, error) {
+	if store.pool == nil {
+		return 0, auth.ErrInvalidVirtualKey
+	}
+	var spend float64
+	err := store.pool.QueryRow(ctx, `SELECT COALESCE(SUM("spend"), 0) FROM "LiteLLM_SpendLogs" WHERE "api_key" = $1 AND "startTime" >= $2`, keyHash, since).Scan(&spend)
+	if err != nil {
+		return 0, fmt.Errorf("aggregate spend: %w", err)
+	}
+	return spend, nil
 }

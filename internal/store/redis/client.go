@@ -53,6 +53,10 @@ func (client *Client) Set(ctx context.Context, key string, value []byte, ttl tim
 	return client.client.Set(ctx, key, value, ttl).Err()
 }
 
+func (client *Client) IncrByFloat(ctx context.Context, key string, amount float64) (float64, error) {
+	return client.client.IncrByFloat(ctx, key, amount).Result()
+}
+
 func (client *Client) Delete(ctx context.Context, key string) error {
 	return client.client.Del(ctx, key).Err()
 }
