@@ -17,7 +17,7 @@
 | F | `litellm/integrations/**`, logging, callbacks | `internal/observability/`, `internal/integrations/` | Prometheus HTTP metrics·request ID 전파·W3C traceparent 전파(general_settings.forward_traceparent_to_llm_provider) 이식 |
 | G | files, batches, audio, images, embeddings, vector stores | `internal/httpapi/`, `internal/providers/` | embeddings·rerank·moderations·OpenAI-compatible image generation/edit, audio/files/batches/vector stores API pass-through 이식; LiteLLM 관리형 multi-provider vector-store registry 대기 |
 | H | `litellm-proxy-extras/**`, `schema.prisma` | `internal/store/postgres/`, SQL migrations | `replica_identity.py`는 `migration.go`의 `ApplyReplicaIdentityFull`로 이식; `prisma_toolchain.py`·`utils.py`의 Prisma/Node 부트스트랩과 DB 매니저는 단일 Go 바이너리 범위에서 제거; 핵심 운영 DDL 이식 |
-| I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | 루트 config.yaml·timeout/retry/alias·resource deployment 선택·fallbacks/weight/max_fallbacks 파싱 이식 |
+| I | `docker/**`, `pyproject.toml`, `uv.lock`, `.env`, config | Dockerfile, `go.mod`, config loader, SQL migration | 루트 config.yaml·timeout/retry/alias·resource deployment 선택·fallbacks/weight/max_fallbacks 파싱·미지원 Python 전용 키 시작 시 경고 이식 |
 
 ## 완료 판정
 

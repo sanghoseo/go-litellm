@@ -26,6 +26,7 @@ type Config struct {
 	ForwardTraceparent bool
 	Fallbacks          []map[string][]string
 	MaxFallbacks       int
+	Unsupported        []string
 }
 
 type Model struct {
@@ -91,6 +92,10 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(contents, &parsed); err != nil {
 		return Config{}, fmt.Errorf("parse YAML: %w", err)
 	}
+	unsupported, err := unsupportedKeys(contents)
+	if err != nil {
+		return Config{}, err
+	}
 
 	for name, value := range parsed.Environment {
 		if _, exists := os.LookupEnv(name); !exists {
@@ -135,6 +140,7 @@ func Load(path string) (Config, error) {
 		ForwardTraceparent: parsed.GeneralSettings.ForwardTraceparent,
 		Fallbacks:          parsed.RouterSettings.Fallbacks,
 		MaxFallbacks:       maxFallbacks(parsed.RouterSettings.MaxFallbacks),
+		Unsupported:        unsupported,
 	}, nil
 }
 
@@ -143,6 +149,59 @@ func maxFallbacks(value int) int {
 		return 5
 	}
 	return value
+}
+
+var supportedModelParams = map[string]struct{}{"model": {}, "api_key": {}, "api_base": {}, "timeout": {}, "stream_timeout": {}, "num_retries": {}, "aws_region_name": {}, "weight": {}}
+var supportedGeneralSettings = map[string]struct{}{"master_key": {}, "resource_model": {}, "forward_traceparent_to_llm_provider": {}}
+var supportedLiteLLMSettings = map[string]struct{}{"request_timeout": {}, "num_retries": {}}
+var supportedRouterSettings = map[string]struct{}{"model_group_alias": {}, "fallbacks": {}, "max_fallbacks": {}}
+var supportedTopLevel = map[string]struct{}{"model_list": {}, "general_settings": {}, "litellm_settings": {}, "router_settings": {}, "environment_variables": {}}
+
+func unsupportedKeys(contents []byte) ([]string, error) {
+	tree := map[string]any{}
+	if err := yaml.Unmarshal(contents, &tree); err != nil {
+		return nil, fmt.Errorf("parse YAML: %w", err)
+	}
+
+	unsupported := []string{}
+	seen := map[string]struct{}{}
+	add := func(path string) {
+		if _, found := seen[path]; !found {
+			seen[path] = struct{}{}
+			unsupported = append(unsupported, path)
+		}
+	}
+	for key := range tree {
+		if _, found := supportedTopLevel[key]; !found {
+			add(key)
+		}
+	}
+	entries, _ := tree["model_list"].([]any)
+	for index, entry := range entries {
+		record, _ := entry.(map[string]any)
+		for key := range record {
+			switch key {
+			case "model_name", "litellm_params":
+			default:
+				add(fmt.Sprintf("model_list[%d].%s", index, key))
+			}
+		}
+		params, _ := record["litellm_params"].(map[string]any)
+		for key := range params {
+			if _, found := supportedModelParams[key]; !found {
+				add(fmt.Sprintf("model_list[%d].litellm_params.%s", index, key))
+			}
+		}
+	}
+	for section, supported := range map[string]map[string]struct{}{"general_settings": supportedGeneralSettings, "litellm_settings": supportedLiteLLMSettings, "router_settings": supportedRouterSettings} {
+		record, _ := tree[section].(map[string]any)
+		for key := range record {
+			if _, found := supported[key]; !found {
+				add(section + "." + key)
+			}
+		}
+	}
+	return unsupported, nil
 }
 
 func (config Config) WithRuntime(databaseURL string, redisURL string) Config {

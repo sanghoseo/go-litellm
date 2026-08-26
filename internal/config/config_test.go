@@ -115,6 +115,68 @@ model_list:
 	}
 }
 
+func TestLoadReportsUnsupportedKeys(t *testing.T) {
+	configPath := writeConfig(t, `
+model_list:
+  - model_name: gpt-test
+    litellm_params:
+      model: openai/gpt-test
+      custom_llm_provider: openai
+      rpm: 100
+general_settings:
+  drop_params: true
+litellm_settings:
+  callbacks: [langfuse]
+router_settings:
+  num_retries: 3
+custom_top_level: value
+`)
+	loaded, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct{}{
+		"model_list[0].litellm_params.custom_llm_provider": {},
+		"model_list[0].litellm_params.rpm":                 {},
+		"general_settings.drop_params":                     {},
+		"litellm_settings.callbacks":                       {},
+		"router_settings.num_retries":                      {},
+		"custom_top_level":                                 {},
+	}
+	if len(loaded.Unsupported) != len(want) {
+		t.Fatalf("Unsupported = %#v, want %#v", loaded.Unsupported, want)
+	}
+	for _, key := range loaded.Unsupported {
+		if _, found := want[key]; !found {
+			t.Fatalf("Unsupported contains unexpected key %q", key)
+		}
+	}
+}
+
+func TestLoadHasNoUnsupportedKeysForSupportedConfig(t *testing.T) {
+	configPath := writeConfig(t, `
+model_list:
+  - model_name: gpt-test
+    litellm_params:
+      model: openai/gpt-test
+      weight: 2
+general_settings:
+  master_key: master
+router_settings:
+  fallbacks:
+    - gpt-test:
+        - gpt-test
+  max_fallbacks: 1
+`)
+	loaded, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Unsupported) != 0 {
+		t.Fatalf("Unsupported = %#v, want none", loaded.Unsupported)
+	}
+}
+
 func TestLoadEnvFileDoesNotOverrideExistingEnvironment(t *testing.T) {
 	t.Setenv("LITELLM_TEST_VALUE", "existing")
 	envPath := filepath.Join(t.TempDir(), ".env")

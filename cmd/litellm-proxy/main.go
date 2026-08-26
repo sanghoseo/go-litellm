@@ -52,6 +52,9 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 	if err != nil {
 		return fmt.Errorf("load proxy configuration: %w", err)
 	}
+	for _, key := range proxyConfig.Unsupported {
+		slog.Warn("ignoring unsupported configuration key", "key", key)
+	}
 
 	var dependencies *localdev.Dependencies
 	if localDevelopment {
