@@ -49,9 +49,13 @@ func (store VirtualKeyStore) CreateVirtualKey(ctx context.Context, record auth.M
 	if store.pool == nil || record.TokenHash == "" {
 		return auth.ErrInvalidVirtualKey
 	}
+	models := record.Models
+	if models == nil {
+		models = []string{}
+	}
 	_, err := store.pool.Exec(ctx, `
 INSERT INTO "LiteLLM_VerificationToken" ("token", "key_alias", "models", "user_id", "team_id", "project_id", "organization_id", "budget_id", "expires", "blocked", "rpm_limit")
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, record.TokenHash, record.KeyAlias, record.Models, record.UserID, record.TeamID, record.ProjectID, record.OrganizationID, record.BudgetID, record.ExpiresAt, record.Blocked, record.RPMLimit)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, record.TokenHash, record.KeyAlias, models, record.UserID, record.TeamID, record.ProjectID, record.OrganizationID, record.BudgetID, record.ExpiresAt, record.Blocked, record.RPMLimit)
 	if err != nil {
 		return fmt.Errorf("create virtual key: %w", err)
 	}
