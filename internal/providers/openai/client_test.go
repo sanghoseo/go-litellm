@@ -162,3 +162,23 @@ func TestRerankUsesConfiguredRerankEndpoint(t *testing.T) {
 	}
 	defer response.Body.Close()
 }
+
+func TestChatCompletionForwardsRequestMetadata(t *testing.T) {
+	var gotRequestID, gotTraceparent string
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotRequestID = request.Header.Get("X-Request-Id")
+		gotTraceparent = request.Header.Get("traceparent")
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+
+	ctx := observability.WithRequestID(context.Background(), "request-123")
+	ctx = observability.WithTraceparent(ctx, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	_, err := NewClient(upstream.Client()).ChatCompletion(ctx, config.Model{Model: "openai/gpt-5", APIBase: upstream.URL + "/v1"}, []byte(`{"model":"gateway-model","messages":[]}`))
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	if gotRequestID != "request-123" || gotTraceparent != "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" {
+		t.Fatalf("request id=%q traceparent=%q", gotRequestID, gotTraceparent)
+	}
+}

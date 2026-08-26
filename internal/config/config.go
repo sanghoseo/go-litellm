@@ -15,14 +15,15 @@ import (
 const environmentReferencePrefix = "os.environ/"
 
 type Config struct {
-	MasterKey      string
-	Models         []Model
-	DatabaseURL    string
-	RedisURL       string
-	RequestTimeout time.Duration
-	NumRetries     int
-	ModelAliases   map[string]string
-	ResourceModel  string
+	MasterKey          string
+	Models             []Model
+	DatabaseURL        string
+	RedisURL           string
+	RequestTimeout     time.Duration
+	NumRetries         int
+	ModelAliases       map[string]string
+	ResourceModel      string
+	ForwardTraceparent bool
 }
 
 type Model struct {
@@ -60,8 +61,9 @@ type modelParams struct {
 }
 
 type generalSettings struct {
-	MasterKey     string `yaml:"master_key"`
-	ResourceModel string `yaml:"resource_model"`
+	MasterKey          string `yaml:"master_key"`
+	ResourceModel      string `yaml:"resource_model"`
+	ForwardTraceparent bool   `yaml:"forward_traceparent_to_llm_provider"`
 }
 
 type litellmSettings struct {
@@ -116,14 +118,15 @@ func Load(path string) (Config, error) {
 	}
 
 	return Config{
-		MasterKey:      masterKey,
-		Models:         models,
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		RedisURL:       redisURLFromEnvironment(),
-		RequestTimeout: secondsDuration(parsed.LiteLLMSettings.RequestTimeout),
-		NumRetries:     parsed.LiteLLMSettings.NumRetries,
-		ModelAliases:   parsed.RouterSettings.ModelGroupAlias,
-		ResourceModel:  parsed.GeneralSettings.ResourceModel,
+		MasterKey:          masterKey,
+		Models:             models,
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		RedisURL:           redisURLFromEnvironment(),
+		RequestTimeout:     secondsDuration(parsed.LiteLLMSettings.RequestTimeout),
+		NumRetries:         parsed.LiteLLMSettings.NumRetries,
+		ModelAliases:       parsed.RouterSettings.ModelGroupAlias,
+		ResourceModel:      parsed.GeneralSettings.ResourceModel,
+		ForwardTraceparent: parsed.GeneralSettings.ForwardTraceparent,
 	}, nil
 }
 

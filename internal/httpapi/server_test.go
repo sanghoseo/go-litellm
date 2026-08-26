@@ -14,6 +14,7 @@ import (
 
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/observability"
 	"github.com/BerriAI/litellm/go-proxy/internal/providers"
 	redisstore "github.com/BerriAI/litellm/go-proxy/internal/store/redis"
 	"github.com/BerriAI/litellm/go-proxy/internal/usage"
@@ -1313,6 +1314,55 @@ func (stubChatCompleter) ChatCompletion(_ context.Context, deployment config.Mod
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl-test"}`)),
 	}, nil
+}
+
+func TestChatCompletionsForwardsTraceparentWhenEnabled(t *testing.T) {
+	completer := &traceCapturingCompleter{}
+	server := NewServerWithRuntime(
+		config.Config{ForwardTraceparent: true, Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-4o-mini"}}},
+		completer, budgetedVirtualKeyValidator{budgetID: ""}, nil, nil,
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if !completer.seen || completer.traceparent != "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" {
+		t.Fatalf("traceparent = %q seen=%v", completer.traceparent, completer.seen)
+	}
+}
+
+func TestChatCompletionsDoesNotForwardTraceparentByDefault(t *testing.T) {
+	completer := &traceCapturingCompleter{}
+	server := NewServerWithRuntime(
+		config.Config{Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-4o-mini"}}},
+		completer, budgetedVirtualKeyValidator{budgetID: ""}, nil, nil,
+	)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer sk-virtual-key")
+	request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if !completer.seen || completer.traceparent != "" {
+		t.Fatalf("traceparent = %q seen=%v, want absent", completer.traceparent, completer.seen)
+	}
+}
+
+type traceCapturingCompleter struct {
+	seen        bool
+	traceparent string
+}
+
+func (completer *traceCapturingCompleter) ChatCompletion(ctx context.Context, _ config.Model, _ []byte) (providers.Response, error) {
+	completer.seen = true
+	completer.traceparent = observability.Traceparent(ctx)
+	return providers.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"chatcmpl-test"}`))}, nil
 }
 
 type budgetedVirtualKeyValidator struct{ budgetID string }

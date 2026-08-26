@@ -54,10 +54,14 @@ router_settings:
     public-name: deployment
 general_settings:
   resource_model: public-name
+  forward_traceparent_to_llm_provider: true
 `)
 	loaded, err := Load(configPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !loaded.ForwardTraceparent {
+		t.Fatal("ForwardTraceparent = false, want true")
 	}
 	if loaded.RequestTimeout != 10*time.Second || loaded.NumRetries != 2 || loaded.ModelAliases["public-name"] != "deployment" || loaded.ResourceModel != "public-name" {
 		t.Fatalf("config = %#v", loaded)

@@ -72,9 +72,7 @@ func (client Client) Passthrough(ctx context.Context, deployment config.Model, m
 	if deployment.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+deployment.APIKey)
 	}
-	if requestID := observability.RequestID(ctx); requestID != "" {
-		request.Header.Set("X-Request-Id", requestID)
-	}
+	observability.ApplyRequestMetadata(ctx, request.Header)
 	response, err := client.httpClient.Do(request)
 	if err != nil {
 		return providers.Response{}, fmt.Errorf("send upstream passthrough request: %w", err)
@@ -99,9 +97,7 @@ func (client Client) request(ctx context.Context, deployment config.Model, body 
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
-	if requestID := observability.RequestID(ctx); requestID != "" {
-		request.Header.Set("X-Request-Id", requestID)
-	}
+	observability.ApplyRequestMetadata(ctx, request.Header)
 	if deployment.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+deployment.APIKey)
 	}

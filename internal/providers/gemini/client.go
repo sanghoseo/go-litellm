@@ -42,9 +42,7 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 		return providers.Response{}, fmt.Errorf("create Gemini request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	if requestID := observability.RequestID(ctx); requestID != "" {
-		request.Header.Set("X-Request-Id", requestID)
-	}
+	observability.ApplyRequestMetadata(ctx, request.Header)
 	response, err := client.httpClient.Do(request)
 	if err != nil {
 		return providers.Response{}, fmt.Errorf("send Gemini request: %w", err)
@@ -87,9 +85,7 @@ func (client Client) CreateEmbedding(ctx context.Context, deployment config.Mode
 			return providers.Response{}, fmt.Errorf("create Gemini embedding request: %w", err)
 		}
 		request.Header.Set("Content-Type", "application/json")
-		if requestID := observability.RequestID(ctx); requestID != "" {
-			request.Header.Set("X-Request-Id", requestID)
-		}
+		observability.ApplyRequestMetadata(ctx, request.Header)
 		response, err := client.httpClient.Do(request)
 		if err != nil {
 			return providers.Response{}, fmt.Errorf("send Gemini embedding request: %w", err)

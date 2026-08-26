@@ -338,7 +338,11 @@ func (server Server) withRequestID(next http.Handler) http.Handler {
 			requestID, _ = litellm.UUID4()
 		}
 		writer.Header().Set("X-Request-Id", requestID)
-		next.ServeHTTP(writer, request.WithContext(observability.WithRequestID(request.Context(), requestID)))
+		inner := observability.WithRequestID(request.Context(), requestID)
+		if server.config.ForwardTraceparent {
+			inner = observability.WithTraceparent(inner, request.Header.Get("traceparent"))
+		}
+		next.ServeHTTP(writer, request.WithContext(inner))
 	})
 }
 

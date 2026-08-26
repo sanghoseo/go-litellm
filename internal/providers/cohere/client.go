@@ -42,9 +42,7 @@ func (client Client) ChatCompletion(ctx context.Context, deployment config.Model
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
-	if requestID := observability.RequestID(ctx); requestID != "" {
-		request.Header.Set("X-Request-Id", requestID)
-	}
+	observability.ApplyRequestMetadata(ctx, request.Header)
 	if deployment.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+deployment.APIKey)
 	}
