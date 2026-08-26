@@ -295,12 +295,12 @@ func TestProjectManagementLifecycle(t *testing.T) {
 	if blocked.Code != http.StatusOK || !manager.projects["project-test"].Blocked {
 		t.Fatalf("block status=%d project=%#v", blocked.Code, manager.projects["project-test"])
 	}
-	deleteRequest := httptest.NewRequest(http.MethodPost, "/project/delete", strings.NewReader("{\"project_id\":\"project-test\"}"))
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/project/delete", strings.NewReader(`{"project_ids":["project-test"]}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
 	deleted := httptest.NewRecorder()
 	server.Handler().ServeHTTP(deleted, deleteRequest)
-	if deleted.Code != http.StatusOK || len(manager.projects) != 0 {
-		t.Fatalf("delete status=%d projects=%#v", deleted.Code, manager.projects)
+	if deleted.Code != http.StatusOK || len(manager.projects) != 0 || !strings.Contains(deleted.Body.String(), `"project_id":"project-test"`) {
+		t.Fatalf("delete status=%d projects=%#v body=%s", deleted.Code, manager.projects, deleted.Body.String())
 	}
 }
 
@@ -321,7 +321,7 @@ func TestOrganizationManagementLifecycle(t *testing.T) {
 	if infoResponse.Code != http.StatusOK || !strings.Contains(infoResponse.Body.String(), `"budget_id":"budget-test"`) {
 		t.Fatalf("info status=%d body=%s", infoResponse.Code, infoResponse.Body.String())
 	}
-	update := httptest.NewRequest(http.MethodPost, "/organization/update", strings.NewReader(`{"organization_id":"org-test","organization_alias":"Updated","blocked":true}`))
+	update := httptest.NewRequest(http.MethodPatch, "/organization/update", strings.NewReader(`{"organization_id":"org-test","organization_alias":"Updated","blocked":true}`))
 	update.Header.Set("Authorization", "Bearer master-key")
 	updated := httptest.NewRecorder()
 	server.Handler().ServeHTTP(updated, update)
@@ -335,12 +335,12 @@ func TestOrganizationManagementLifecycle(t *testing.T) {
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"organization_id":"org-test"`) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
 	}
-	deleteRequest := httptest.NewRequest(http.MethodPost, "/organization/delete", strings.NewReader(`{"organization_id":"org-test"}`))
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/organization/delete", strings.NewReader(`{"organization_ids":["org-test"]}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
 	deleted := httptest.NewRecorder()
 	server.Handler().ServeHTTP(deleted, deleteRequest)
-	if deleted.Code != http.StatusOK || len(manager.organizations) != 0 {
-		t.Fatalf("delete status=%d organizations=%#v", deleted.Code, manager.organizations)
+	if deleted.Code != http.StatusOK || len(manager.organizations) != 0 || !strings.Contains(deleted.Body.String(), `"organization_id":"org-test"`) {
+		t.Fatalf("delete status=%d organizations=%#v body=%s", deleted.Code, manager.organizations, deleted.Body.String())
 	}
 }
 

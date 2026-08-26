@@ -184,8 +184,8 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /organization/new", server.createOrganization)
 	mux.HandleFunc("GET /organization/info", server.organizationInfo)
 	mux.HandleFunc("GET /organization/list", server.listOrganizations)
-	mux.HandleFunc("POST /organization/update", server.updateOrganization)
-	mux.HandleFunc("POST /organization/delete", server.deleteOrganization)
+	mux.HandleFunc("PATCH /organization/update", server.updateOrganization)
+	mux.HandleFunc("DELETE /organization/delete", server.deleteOrganization)
 	mux.HandleFunc("POST /budget/new", server.createBudget)
 	mux.HandleFunc("POST /budget/info", server.budgetInfo)
 	mux.HandleFunc("GET /budget/list", server.listBudgets)
@@ -211,7 +211,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /project/update", server.updateProject)
 	mux.HandleFunc("POST /project/block", server.blockProject)
 	mux.HandleFunc("POST /project/unblock", server.unblockProject)
-	mux.HandleFunc("POST /project/delete", server.deleteProject)
+	mux.HandleFunc("DELETE /project/delete", server.deleteProject)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -1331,18 +1331,37 @@ func (server Server) deleteProject(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	var input struct {
-		ProjectID string `json:"project_id"`
+		ProjectIDs []string `json:"project_ids"`
+		ProjectID  string   `json:"project_id"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.ProjectID == "" {
-		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'project_id'", Type: "invalid_request_error", Code: "invalid_request"})
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
-	deleted, err := server.projectManager.DeleteProject(request.Context(), input.ProjectID)
-	if err != nil {
-		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete project", Type: "server_error", Code: "project_deletion_failed"})
+	if input.ProjectID != "" {
+		input.ProjectIDs = append(input.ProjectIDs, input.ProjectID)
+	}
+	if len(input.ProjectIDs) == 0 {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'project_ids'", Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
+	deletedProjects := make([]projectResponse, 0, len(input.ProjectIDs))
+	for _, projectID := range input.ProjectIDs {
+		project, err := server.projectManager.GetProject(request.Context(), projectID)
+		if err != nil {
+			writeJSON(writer, http.StatusNotFound, openAIError{Message: "Project not found", Type: "invalid_request_error", Code: "project_not_found"})
+			return
+		}
+		deleted, err := server.projectManager.DeleteProject(request.Context(), projectID)
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete project", Type: "server_error", Code: "project_deletion_failed"})
+			return
+		}
+		if deleted {
+			deletedProjects = append(deletedProjects, projectResponseFrom(project))
+		}
+	}
+	writeJSON(writer, http.StatusOK, deletedProjects)
 }
 
 func projectResponseFrom(project auth.ManagedProject) projectResponse {
@@ -1464,18 +1483,37 @@ func (server Server) deleteOrganization(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var in struct {
-		OrganizationID string `json:"organization_id"`
+		OrganizationIDs []string `json:"organization_ids"`
+		OrganizationID  string   `json:"organization_id"`
 	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil || in.OrganizationID == "" {
-		writeJSON(w, 400, openAIError{Message: "Missing required parameter: 'organization_id'", Type: "invalid_request_error", Code: "invalid_request"})
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in) != nil {
+		writeJSON(w, 400, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
-	ok, e := server.organizationManager.DeleteOrganization(r.Context(), in.OrganizationID)
-	if e != nil {
-		writeJSON(w, 500, openAIError{Message: "Could not delete organization", Type: "server_error", Code: "organization_deletion_failed"})
+	if in.OrganizationID != "" {
+		in.OrganizationIDs = append(in.OrganizationIDs, in.OrganizationID)
+	}
+	if len(in.OrganizationIDs) == 0 {
+		writeJSON(w, 400, openAIError{Message: "Missing required parameter: 'organization_ids'", Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
-	writeJSON(w, 200, map[string]bool{"deleted": ok})
+	deletedOrganizations := make([]organizationResponse, 0, len(in.OrganizationIDs))
+	for _, organizationID := range in.OrganizationIDs {
+		organization, err := server.organizationManager.GetOrganization(r.Context(), organizationID)
+		if err != nil {
+			writeJSON(w, 404, openAIError{Message: "Organization not found", Type: "invalid_request_error", Code: "organization_not_found"})
+			return
+		}
+		ok, e := server.organizationManager.DeleteOrganization(r.Context(), organizationID)
+		if e != nil {
+			writeJSON(w, 500, openAIError{Message: "Could not delete organization", Type: "server_error", Code: "organization_deletion_failed"})
+			return
+		}
+		if ok {
+			deletedOrganizations = append(deletedOrganizations, organizationResponseFrom(organization))
+		}
+	}
+	writeJSON(w, 200, deletedOrganizations)
 }
 
 type modelRequestCompleter func(context.Context, config.Model, []byte) (providers.Response, error)
