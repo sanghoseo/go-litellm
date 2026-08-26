@@ -38,6 +38,19 @@ func TestRegistryPassesDeploymentTimeoutToProvider(t *testing.T) {
 	}
 }
 
+func TestRegistryUsesStreamTimeoutForStreamingChat(t *testing.T) {
+	provider := &streamTimeoutClient{}
+	registry := NewRegistry(map[string]Client{"openai": provider})
+	_, err := registry.ChatCompletion(context.Background(), config.Model{Model: "openai/gpt-test", Timeout: time.Second, StreamTimeout: 25 * time.Millisecond}, []byte(`{"stream":true}`))
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	remaining := time.Until(provider.deadline)
+	if remaining <= 0 || remaining > 100*time.Millisecond {
+		t.Fatalf("remaining timeout = %s, want stream timeout", remaining)
+	}
+}
+
 func TestRegistryRejectsUnportedProvider(t *testing.T) {
 	registry := NewRegistry(nil)
 	_, err := registry.ChatCompletion(context.Background(), config.Model{Model: "anthropic/claude-test"}, nil)
@@ -87,5 +100,22 @@ func (timeoutClient) CreateResponse(context.Context, config.Model, []byte) (Resp
 	return Response{}, nil
 }
 func (timeoutClient) CreateEmbedding(context.Context, config.Model, []byte) (Response, error) {
+	return Response{}, nil
+}
+
+type streamTimeoutClient struct{ deadline time.Time }
+
+func (client *streamTimeoutClient) ChatCompletion(ctx context.Context, _ config.Model, _ []byte) (Response, error) {
+	deadline, found := ctx.Deadline()
+	if !found {
+		return Response{}, errors.New("missing deadline")
+	}
+	client.deadline = deadline
+	return Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+}
+func (*streamTimeoutClient) CreateResponse(context.Context, config.Model, []byte) (Response, error) {
+	return Response{}, nil
+}
+func (*streamTimeoutClient) CreateEmbedding(context.Context, config.Model, []byte) (Response, error) {
 	return Response{}, nil
 }

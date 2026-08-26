@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -41,9 +42,19 @@ func (registry Registry) ChatCompletion(ctx context.Context, deployment config.M
 	if err != nil {
 		return Response{}, err
 	}
+	if isStreamingRequest(body) && deployment.StreamTimeout > 0 {
+		deployment.Timeout = deployment.StreamTimeout
+	}
 	return retry(ctx, deployment, func(callContext context.Context) (Response, error) {
 		return client.ChatCompletion(callContext, deployment, body)
 	})
+}
+
+func isStreamingRequest(body []byte) bool {
+	var request struct {
+		Stream bool `json:"stream"`
+	}
+	return json.Unmarshal(body, &request) == nil && request.Stream
 }
 
 func (registry Registry) CreateResponse(ctx context.Context, deployment config.Model, body []byte) (Response, error) {
