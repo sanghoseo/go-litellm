@@ -11,6 +11,30 @@ import (
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
+func TestOpenAIStreamConvertsBedrockEvents(t *testing.T) {
+	events := make(chan bedrocktypes.ConverseStreamOutput, 3)
+	events <- &bedrocktypes.ConverseStreamOutputMemberMessageStart{Value: bedrocktypes.MessageStartEvent{Role: bedrocktypes.ConversationRoleAssistant}}
+	events <- &bedrocktypes.ConverseStreamOutputMemberContentBlockDelta{Value: bedrocktypes.ContentBlockDeltaEvent{Delta: &bedrocktypes.ContentBlockDeltaMemberText{Value: "hello"}}}
+	events <- &bedrocktypes.ConverseStreamOutputMemberMessageStop{Value: bedrocktypes.MessageStopEvent{StopReason: bedrocktypes.StopReasonEndTurn}}
+	close(events)
+
+	stream, err := io.ReadAll(openAIStream(mockStream{events: events}, "bedrock/anthropic.test"))
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if !strings.Contains(string(stream), `"role":"assistant"`) || !strings.Contains(string(stream), `"content":"hello"`) || !strings.Contains(string(stream), `"finish_reason":"stop"`) || !strings.HasSuffix(string(stream), "data: [DONE]\n\n") {
+		t.Fatalf("stream = %s", stream)
+	}
+}
+
+type mockStream struct {
+	events <-chan bedrocktypes.ConverseStreamOutput
+}
+
+func (stream mockStream) Events() <-chan bedrocktypes.ConverseStreamOutput { return stream.events }
+func (mockStream) Close() error                                            { return nil }
+func (mockStream) Err() error                                              { return nil }
+
 func TestChatCompletionConvertsBedrockConverse(t *testing.T) {
 	client := NewClientWithFactory(func(_ context.Context, region string) (converseClient, error) {
 		if region != "us-east-1" {
