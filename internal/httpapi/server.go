@@ -1479,7 +1479,7 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 	}
 	deployment, found := server.deploymentFor(modelName)
 	if !found {
-		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: fmt.Sprintf("Invalid model name passed in model=%s. Call `/v1/models` to view available models for your key.", modelName), Type: "None", Code: "400"})
 		return
 	}
 	virtualKey, authorized := server.authorize(request, modelName)
@@ -1555,7 +1555,7 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 	}
 	deployment, found := server.deploymentFor(modelName)
 	if !found {
-		writeJSON(writer, http.StatusNotFound, openAIError{Message: fmt.Sprintf("The model %q does not exist", modelName), Type: "invalid_request_error", Code: "model_not_found"})
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: fmt.Sprintf("Invalid model name passed in model=%s. Call `/v1/models` to view available models for your key.", modelName), Type: "None", Code: "400"})
 		return
 	}
 	virtualKey, authorized := server.authorize(request, modelName)
@@ -2013,6 +2013,19 @@ type modelResponse struct {
 }
 
 type openAIError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+}
+
+func (value openAIError) MarshalJSON() ([]byte, error) {
+	type envelope struct {
+		Error errorPayload `json:"error"`
+	}
+	return json.Marshal(envelope{Error: errorPayload{Message: value.Message, Type: value.Type, Code: value.Code}})
+}
+
+type errorPayload struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Code    string `json:"code"`

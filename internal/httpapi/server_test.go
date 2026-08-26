@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -30,6 +31,60 @@ func TestModelsRequiresMasterKey(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
 	}
+}
+
+func TestErrorResponsesUseOpenAIErrorEnvelope(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gpt-test", Model: "openai/gpt-test"}}})
+
+	missingKey := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	missingKeyResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(missingKeyResponse, missingKey)
+	if missingKeyResponse.Code != http.StatusUnauthorized || !hasErrorEnvelope(missingKeyResponse.Body.String()) {
+		t.Fatalf("missing key status=%d body=%s", missingKeyResponse.Code, missingKeyResponse.Body.String())
+	}
+
+	badKey := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	badKey.Header.Set("Authorization", "Bearer wrong")
+	badKeyResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(badKeyResponse, badKey)
+	if badKeyResponse.Code != http.StatusUnauthorized || !hasErrorEnvelope(badKeyResponse.Body.String()) {
+		t.Fatalf("bad key status=%d body=%s", badKeyResponse.Code, badKeyResponse.Body.String())
+	}
+}
+
+func TestChatCompletionInvalidModelMatchesPythonContract(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gpt-test", Model: "openai/gpt-test"}}}, stubChatCompleter{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"nope","messages":[{"role":"user","content":"hi"}]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400, body=%s", response.Code, response.Body.String())
+	}
+	if !hasErrorEnvelope(response.Body.String()) {
+		t.Fatalf("body missing error envelope: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `model=nope`) {
+		t.Fatalf("body missing model in message: %s", response.Body.String())
+	}
+}
+
+func hasErrorEnvelope(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	if !strings.HasPrefix(trimmed, `{"error":`) {
+		return false
+	}
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal([]byte(body), &envelope) == nil && envelope.Error.Message != ""
 }
 
 func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
