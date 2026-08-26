@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -44,6 +45,9 @@ type Record struct {
 }
 
 func UsageFromOpenAIResponse(body []byte) (proxytpes.Usage, error) {
+	if isSSEBody(body) {
+		return usageFromSSEBody(body), nil
+	}
 	payload := struct {
 		Usage *proxytpes.Usage `json:"usage"`
 	}{}
@@ -54,4 +58,38 @@ func UsageFromOpenAIResponse(body []byte) (proxytpes.Usage, error) {
 		return proxytpes.Usage{}, nil
 	}
 	return *payload.Usage, nil
+}
+
+func isSSEBody(body []byte) bool {
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	return bytes.HasPrefix(trimmed, []byte("data:")) || bytes.HasPrefix(trimmed, []byte("event:"))
+}
+
+func usageFromSSEBody(body []byte) proxytpes.Usage {
+	var usage proxytpes.Usage
+	found := false
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimRight(line, " \t\r")
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+		chunk := struct {
+			Usage *proxytpes.Usage `json:"usage"`
+		}{}
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			continue
+		}
+		if chunk.Usage != nil {
+			usage = *chunk.Usage
+			found = true
+		}
+	}
+	if !found {
+		return proxytpes.Usage{}
+	}
+	return usage
 }
