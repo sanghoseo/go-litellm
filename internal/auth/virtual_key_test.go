@@ -22,8 +22,8 @@ func TestValidatorRejectsKeyOutsideModelAllowlist(t *testing.T) {
 	validator := NewValidator(stubStore{key: VirtualKey{Models: []string{"gateway-model"}}})
 
 	_, err := validator.Validate(context.Background(), "sk-test", "other-model")
-	if !errors.Is(err, ErrInvalidVirtualKey) {
-		t.Fatalf("Validate() error = %v, want ErrInvalidVirtualKey", err)
+	if !errors.Is(err, ErrModelAccessDenied) {
+		t.Fatalf("Validate() error = %v, want ErrModelAccessDenied", err)
 	}
 }
 

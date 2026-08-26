@@ -72,6 +72,26 @@ func TestChatCompletionInvalidModelMatchesPythonContract(t *testing.T) {
 	}
 }
 
+func TestChatCompletionDeniedModelAccessMatchesPythonContract(t *testing.T) {
+	server := NewServerWithVirtualKeyValidator(config.Config{Models: []config.Model{{Name: "allowed", Model: "openai/allowed"}}}, stubChatCompleter{}, scopedModelsValidator{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"other-model","messages":[{"role":"user","content":"hi"}]}`))
+	request.Header.Set("Authorization", "Bearer sk-test")
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want 403, body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"type":"key_model_access_denied"`) {
+		t.Fatalf("body missing key_model_access_denied: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `Tried to access other-model`) {
+		t.Fatalf("body missing attempted model: %s", response.Body.String())
+	}
+}
+
 func hasErrorEnvelope(body string) bool {
 	trimmed := strings.TrimSpace(body)
 	if !strings.HasPrefix(trimmed, `{"error":`) {
@@ -1390,7 +1410,7 @@ type scopedModelsValidator struct{}
 func (scopedModelsValidator) Validate(_ context.Context, _ string, model string) (auth.VirtualKey, error) {
 	key := auth.VirtualKey{Models: []string{"shared", "key-only"}, UserModels: []string{"shared", "key-only"}, TeamModels: []string{"shared", "key-only"}, ProjectModels: []string{"shared"}, OrganizationModels: []string{"shared"}}
 	if model != "" && !auth.AllowsModel(key, model) {
-		return auth.VirtualKey{}, auth.ErrInvalidVirtualKey
+		return key, auth.ErrModelAccessDenied
 	}
 	return key, nil
 }

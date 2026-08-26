@@ -600,9 +600,9 @@ func (server Server) forwardPassthrough(writer http.ResponseWriter, request *htt
 		server.providerUnavailable(writer, "No deployment is configured")
 		return
 	}
-	virtualKey, authorized := server.authorize(request, deployment.Name)
-	if !authorized {
-		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+	virtualKey, authErr := server.authorize(request, deployment.Name)
+	if authErr != nil {
+		writeAuthError(writer, virtualKey, deployment.Name, authErr)
 		return
 	}
 	if !server.allowedByRateLimit(request.Context(), virtualKey, deployment.Name) {
@@ -1477,14 +1477,14 @@ func (server Server) forwardModelRequest(writer http.ResponseWriter, request *ht
 		writeJSON(writer, http.StatusBadRequest, openAIError{Message: err.Error(), Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
+	virtualKey, authErr := server.authorize(request, modelName)
+	if authErr != nil {
+		writeAuthError(writer, virtualKey, modelName, authErr)
+		return
+	}
 	deployment, found := server.deploymentFor(modelName)
 	if !found {
 		writeJSON(writer, http.StatusBadRequest, openAIError{Message: fmt.Sprintf("Invalid model name passed in model=%s. Call `/v1/models` to view available models for your key.", modelName), Type: "None", Code: "400"})
-		return
-	}
-	virtualKey, authorized := server.authorize(request, modelName)
-	if !authorized {
-		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
 	if !server.allowedByRateLimit(request.Context(), virtualKey, modelName) {
@@ -1553,14 +1553,14 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		writeJSON(writer, http.StatusBadRequest, openAIError{Message: err.Error(), Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
+	virtualKey, authErr := server.authorize(request, modelName)
+	if authErr != nil {
+		writeAuthError(writer, virtualKey, modelName, authErr)
+		return
+	}
 	deployment, found := server.deploymentFor(modelName)
 	if !found {
 		writeJSON(writer, http.StatusBadRequest, openAIError{Message: fmt.Sprintf("Invalid model name passed in model=%s. Call `/v1/models` to view available models for your key.", modelName), Type: "None", Code: "400"})
-		return
-	}
-	virtualKey, authorized := server.authorize(request, modelName)
-	if !authorized {
-		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
 	if !server.allowedByRateLimit(request.Context(), virtualKey, modelName) {
@@ -1754,8 +1754,8 @@ func (server Server) readiness(writer http.ResponseWriter, request *http.Request
 }
 
 func (server Server) models(writer http.ResponseWriter, request *http.Request) {
-	virtualKey, authorized := server.authorize(request, "")
-	if !authorized {
+	virtualKey, authErr := server.authorize(request, "")
+	if authErr != nil {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
@@ -1783,8 +1783,8 @@ func (server Server) models(writer http.ResponseWriter, request *http.Request) {
 
 func (server Server) model(writer http.ResponseWriter, request *http.Request) {
 	modelID := request.PathValue("modelID")
-	virtualKey, authorized := server.authorize(request, modelID)
-	if !authorized {
+	virtualKey, authErr := server.authorize(request, modelID)
+	if authErr != nil {
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
@@ -1813,18 +1813,43 @@ func (server Server) spendLogs(writer http.ResponseWriter, request *http.Request
 	writeJSON(writer, 200, logs)
 }
 
-func (server Server) authorize(request *http.Request, model string) (auth.VirtualKey, bool) {
+func (server Server) authorize(request *http.Request, model string) (auth.VirtualKey, error) {
 	provided, found := bearerToken(request)
 	if server.config.MasterKey != "" && found && len(provided) == len(server.config.MasterKey) && subtle.ConstantTimeCompare([]byte(provided), []byte(server.config.MasterKey)) == 1 {
-		return auth.VirtualKey{}, true
+		return auth.VirtualKey{}, nil
 	}
 	if server.keyValidator != nil && found {
 		virtualKey, err := server.keyValidator.Validate(request.Context(), provided, model)
 		if err == nil {
-			return virtualKey, true
+			return virtualKey, nil
 		}
+		return auth.VirtualKey{}, err
 	}
-	return auth.VirtualKey{}, server.config.MasterKey == "" && server.keyValidator == nil
+	if server.config.MasterKey == "" && server.keyValidator == nil {
+		return auth.VirtualKey{}, nil
+	}
+	return auth.VirtualKey{}, errUnauthorized
+}
+
+var errUnauthorized = errors.New("unauthorized")
+
+func writeAuthError(writer http.ResponseWriter, virtualKey auth.VirtualKey, model string, err error) {
+	if errors.Is(err, auth.ErrModelAccessDenied) {
+		writeJSON(writer, http.StatusForbidden, openAIError{Message: fmt.Sprintf("key not allowed to access model. This key can only access models=%s. Tried to access %s", formatModelScope(virtualKey.Models), model), Type: "key_model_access_denied", Code: "403"})
+		return
+	}
+	writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+}
+
+func formatModelScope(models []string) string {
+	if len(models) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, len(models))
+	for i, model := range models {
+		quoted[i] = "'" + model + "'"
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 type budgetRequest struct {

@@ -11,6 +11,8 @@ import (
 
 var ErrInvalidVirtualKey = errors.New("invalid virtual key")
 
+var ErrModelAccessDenied = errors.New("model access denied")
+
 type VirtualKey struct {
 	TokenHash          string
 	Models             []string
@@ -217,7 +219,7 @@ func (validator Validator) Validate(ctx context.Context, rawKey string, model st
 		return VirtualKey{}, ErrInvalidVirtualKey
 	}
 	if model != "" && !AllowsModel(virtualKey, model) {
-		return VirtualKey{}, ErrInvalidVirtualKey
+		return virtualKey, ErrModelAccessDenied
 	}
 	return virtualKey, nil
 }
