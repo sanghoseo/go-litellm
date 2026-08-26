@@ -24,3 +24,9 @@
 1. 원본 공개 API와 OpenAI 호환 HTTP 계약을 Go contract test가 검증한다.
 2. 의존 Python import와 Python runtime은 Go release image 및 binary runtime 경로에 남지 않는다.
 3. 모든 원본 Python 파일은 manifest에서 `이식`, `삭제`, 또는 `비대상` 사유로 분류된다.
+
+## 검증 기록
+
+- `--local-dev`(embedded PostgreSQL + miniredis) 기동·인증·모델 조회 E2E 통과.
+- Docker 컨테이너 배포 검증: distroless 이미지에 Python 런타임(`/python`, `/uvicorn`)이 없고, 외부 PostgreSQL·Redis에 연결해 `/health/readiness` 200·`/v1/models` 200 반환.
+- SSE 스트리밍 응답의 usage/cost 기록 지원(최종 chunk의 `usage` 파싱).
