@@ -32,5 +32,7 @@
 - SSE 스트리밍 응답의 usage/cost 기록 지원(최종 chunk의 `usage` 파싱).
 - Python-Go contract 비교(실 Python proxy 대비, 동일 fixture):
   - 에러 envelope `{"error":{...}}`, 상태 코드(401/403/400), 인증→모델 접근(403 `key_model_access_denied`)→모델 존재 순서 일치.
-  - proxy 인증 실패의 `type`/`code`는 OpenAI 표준(`invalid_api_key`)을 유지. 이 repo의 Go SDK client contract test가 같은 값을 검증.
+  - `/v1/models`가 model group alias(예: `default`)를 노출.
+  - `/key/delete`가 Python 계약의 `{"keys":[...]}` 입력과 `{"deleted_keys":[...]}` 응답을 사용(레거시 `{"key"}`도 호환).
+  - proxy 인증 실패의 `type`/`code`는 OpenAI 표준(`invalid_api_key`)을 유지. 이 repo의 Go SDK client contract test가 같은 값을 검증. Python의 `auth_error`/`token_not_found_in_db`는 상태 코드와 envelope은 동일하므로 합의된 차이로 기록.
   - upstream 401은 provider 응답을 그대로 전파(OpenAI SDK가 받는 형태와 동일).
