@@ -715,18 +715,32 @@ func (server Server) deleteKey(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	var input struct {
-		Key string `json:"key"`
+		Keys []string `json:"keys"`
+		Key  string   `json:"key"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil || input.Key == "" {
-		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'key'", Type: "invalid_request_error", Code: "invalid_request"})
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Request body must be valid JSON", Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
-	deleted, err := server.keyManager.DeleteVirtualKey(request.Context(), auth.HashKey(input.Key))
-	if err != nil {
-		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete key", Type: "server_error", Code: "key_deletion_failed"})
+	if input.Key != "" {
+		input.Keys = append(input.Keys, input.Key)
+	}
+	if len(input.Keys) == 0 {
+		writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Missing required parameter: 'keys'", Type: "invalid_request_error", Code: "invalid_request"})
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]bool{"deleted": deleted})
+	deletedKeys := make([]string, 0, len(input.Keys))
+	for _, rawKey := range input.Keys {
+		deleted, err := server.keyManager.DeleteVirtualKey(request.Context(), auth.HashKey(rawKey))
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not delete key", Type: "server_error", Code: "key_deletion_failed"})
+			return
+		}
+		if deleted {
+			deletedKeys = append(deletedKeys, rawKey)
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"deleted_keys": deletedKeys})
 }
 
 func (server Server) blockKey(writer http.ResponseWriter, request *http.Request) {

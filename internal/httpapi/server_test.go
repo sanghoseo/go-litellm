@@ -171,12 +171,20 @@ func TestVirtualKeyManagementRequiresMasterKeyAndStoresOnlyHash(t *testing.T) {
 		t.Fatalf("regenerate status=%d body=%s records=%v", regenerated.Code, regenerated.Body.String(), manager.records)
 	}
 
-	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
+	deleteRequest := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"keys":["sk-test-key"]}`))
 	deleteRequest.Header.Set("Authorization", "Bearer master-key")
 	deleted := httptest.NewRecorder()
 	server.Handler().ServeHTTP(deleted, deleteRequest)
-	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":false`) || len(manager.records) != 1 {
-		t.Fatalf("delete status=%d records=%v", deleted.Code, manager.records)
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted_keys":[]`) || len(manager.records) != 1 {
+		t.Fatalf("delete status=%d body=%s records=%v", deleted.Code, deleted.Body.String(), manager.records)
+	}
+
+	legacyDelete := httptest.NewRequest(http.MethodPost, "/key/delete", strings.NewReader(`{"key":"sk-test-key"}`))
+	legacyDelete.Header.Set("Authorization", "Bearer master-key")
+	legacyResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(legacyResponse, legacyDelete)
+	if legacyResponse.Code != http.StatusOK || !strings.Contains(legacyResponse.Body.String(), `"deleted_keys":[]`) || len(manager.records) != 1 {
+		t.Fatalf("legacy delete status=%d body=%s", legacyResponse.Code, legacyResponse.Body.String())
 	}
 }
 
