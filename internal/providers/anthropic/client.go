@@ -183,8 +183,51 @@ func messagesRequest(body []byte, configuredModel string) ([]byte, error) {
 		filtered = append(filtered, message)
 	}
 	payload["messages"], _ = json.Marshal(filtered)
+	if err := translateTools(payload); err != nil {
+		return nil, err
+	}
 	delete(payload, "stream_options")
 	return json.Marshal(payload)
+}
+
+func translateTools(payload map[string]json.RawMessage) error {
+	rawTools, found := payload["tools"]
+	if !found {
+		return nil
+	}
+	var openAITools []struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Parameters  json.RawMessage `json:"parameters"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rawTools, &openAITools); err != nil {
+		return fmt.Errorf("decode OpenAI tools: %w", err)
+	}
+	type anthropicTool struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		InputSchema json.RawMessage `json:"input_schema"`
+	}
+	tools := make([]anthropicTool, 0, len(openAITools))
+	for _, tool := range openAITools {
+		if tool.Type != "function" || tool.Function.Name == "" {
+			continue
+		}
+		inputSchema := tool.Function.Parameters
+		if len(inputSchema) == 0 {
+			inputSchema = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		tools = append(tools, anthropicTool{Name: tool.Function.Name, Description: tool.Function.Description, InputSchema: inputSchema})
+	}
+	encodedTools, err := json.Marshal(tools)
+	if err != nil {
+		return fmt.Errorf("encode Anthropic tools: %w", err)
+	}
+	payload["tools"] = encodedTools
+	return nil
 }
 
 func chatCompletionResponse(body io.Reader) ([]byte, error) {
@@ -193,8 +236,11 @@ func chatCompletionResponse(body io.Reader) ([]byte, error) {
 		Model      string `json:"model"`
 		StopReason string `json:"stop_reason"`
 		Content    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			ID    string          `json:"id"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
 		} `json:"content"`
 		Usage struct {
 			InputTokens  int `json:"input_tokens"`
@@ -205,19 +251,41 @@ func chatCompletionResponse(body io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("decode Anthropic response: %w", err)
 	}
 	parts := make([]string, 0, len(response.Content))
+	toolCalls := make([]map[string]any, 0)
 	for _, content := range response.Content {
 		if content.Type == "text" {
 			parts = append(parts, content.Text)
 		}
+		if content.Type == "tool_use" {
+			arguments := string(content.Input)
+			if arguments == "" {
+				arguments = "{}"
+			}
+			toolCalls = append(toolCalls, map[string]any{"id": content.ID, "type": "function", "function": map[string]string{"name": content.Name, "arguments": arguments}})
+		}
 	}
 	content, _ := json.Marshal(strings.Join(parts, ""))
+	message := proxytpes.Message{Role: "assistant", Content: content}
+	if len(toolCalls) > 0 {
+		encodedCalls, err := json.Marshal(toolCalls)
+		if err != nil {
+			return nil, fmt.Errorf("encode Anthropic tool calls: %w", err)
+		}
+		message.ToolCalls = encodedCalls
+		if len(parts) == 0 {
+			message.Content = nil
+		}
+	}
 	finishReason := response.StopReason
 	if finishReason == "end_turn" {
 		finishReason = "stop"
 	}
+	if finishReason == "tool_use" {
+		finishReason = "tool_calls"
+	}
 	return json.Marshal(proxytpes.ChatCompletionResponse{
 		ID: response.ID, Object: "chat.completion", Created: time.Now().Unix(), Model: response.Model,
-		Choices: []proxytpes.ChatChoice{{Index: 0, Message: proxytpes.Message{Role: "assistant", Content: content}, FinishReason: &finishReason}},
+		Choices: []proxytpes.ChatChoice{{Index: 0, Message: message, FinishReason: &finishReason}},
 		Usage:   &proxytpes.Usage{PromptTokens: response.Usage.InputTokens, CompletionTokens: response.Usage.OutputTokens, TotalTokens: response.Usage.InputTokens + response.Usage.OutputTokens},
 	})
 }

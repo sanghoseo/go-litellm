@@ -66,3 +66,30 @@ func TestChatCompletionConvertsAnthropicStream(t *testing.T) {
 		t.Fatalf("converted stream = %s", stream)
 	}
 }
+
+func TestChatCompletionConvertsTools(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), `"input_schema":{"type":"object","properties":{"city":{"type":"string"}}}`) || strings.Contains(string(body), `"function"`) {
+			t.Fatalf("tools were not converted: %s", body)
+		}
+		_, _ = writer.Write([]byte(`{"id":"msg_1","model":"claude-test","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_1","name":"weather","input":{"city":"Seoul"}}],"usage":{"input_tokens":3,"output_tokens":2}}`))
+	}))
+	defer upstream.Close()
+
+	response, err := NewClient(upstream.Client()).ChatCompletion(context.Background(), config.Model{Model: "anthropic/claude-test", APIBase: upstream.URL + "/v1"}, []byte(`{"model":"gateway","messages":[{"role":"user","content":"weather"}],"tools":[{"type":"function","function":{"name":"weather","description":"Get weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	converted, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(converted), `"finish_reason":"tool_calls"`) || !strings.Contains(string(converted), `"name":"weather"`) || !strings.Contains(string(converted), `"arguments":"{\"city\":\"Seoul\"}"`) {
+		t.Fatalf("converted = %s", converted)
+	}
+}
