@@ -605,6 +605,39 @@ func TestChatCompletionsFallsBackAfterProviderServerFailure(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsFallsBackToConfiguredModelGroup(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
+		{Name: "primary", Model: "openai/gpt-5", APIBase: "https://one.example"},
+		{Name: "backup", Model: "anthropic/claude", APIBase: "https://backup.example"},
+	}, Fallbacks: []map[string][]string{{"primary": {"backup"}}}}, fallbackChatCompleter{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"primary","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != `{"deployment":"two"}` {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestChatCompletionsStopsAfterMaxFallbacks(t *testing.T) {
+	completer := &failingCountingChatCompleter{}
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://one.example"},
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://two.example"},
+		{Name: "gateway-model", Model: "openai/gpt-5", APIBase: "https://three.example"},
+	}, MaxFallbacks: 1}, completer)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d, want %d", response.Code, http.StatusBadGateway)
+	}
+	if completer.calls != 2 {
+		t.Fatalf("completer calls = %d, want 2 (initial + 1 fallback)", completer.calls)
+	}
+}
+
 func TestEmbeddingsFallsBackAfterProviderError(t *testing.T) {
 	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{
 		{Name: "embedding-model", Model: "openai/text-embedding", APIBase: "https://one.example"},
@@ -1141,6 +1174,15 @@ type deploymentCapturingCompleter struct {
 }
 
 type fallbackChatCompleter struct{}
+
+type failingCountingChatCompleter struct {
+	calls int
+}
+
+func (completer *failingCountingChatCompleter) ChatCompletion(_ context.Context, _ config.Model, _ []byte) (providers.Response, error) {
+	completer.calls++
+	return providers.Response{}, errors.New("always fails")
+}
 
 type fallbackServerFailureCompleter struct{}
 

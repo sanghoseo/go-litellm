@@ -119,7 +119,7 @@ func NewServer(proxyConfig config.Config, completers ...providers.ChatCompleter)
 	if len(completers) > 0 {
 		chatCompleter = completers[0]
 	}
-	server := Server{config: proxyConfig, chatCompleter: chatCompleter, metrics: observability.NewMetrics(), router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases), costCalculator: usage.NewCostCalculator()}
+	server := Server{config: proxyConfig, chatCompleter: chatCompleter, metrics: observability.NewMetrics(), router: routing.NewWithFallbacks(proxyConfig.Models, proxyConfig.ModelAliases, proxyConfig.Fallbacks), costCalculator: usage.NewCostCalculator()}
 	server.setOptionalCompleters(chatCompleter)
 	return server
 }
@@ -133,7 +133,7 @@ func NewServerWithDependencies(proxyConfig config.Config, completer providers.Ch
 }
 
 func NewServerWithRuntime(proxyConfig config.Config, completer providers.ChatCompleter, validator VirtualKeyValidator, recorder usage.Recorder, limiter RequestLimiter, readinessChecks ...ReadinessCheck) Server {
-	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, readinessChecks: readinessChecks, metrics: observability.NewMetrics(), router: routing.NewWithAliases(proxyConfig.Models, proxyConfig.ModelAliases)}
+	server := Server{config: proxyConfig, chatCompleter: completer, keyValidator: validator, usageRecorder: recorder, requestLimiter: limiter, readinessChecks: readinessChecks, metrics: observability.NewMetrics(), router: routing.NewWithFallbacks(proxyConfig.Models, proxyConfig.ModelAliases, proxyConfig.Fallbacks)}
 	server.setOptionalCompleters(completer)
 	return server
 }
@@ -1609,8 +1609,13 @@ func (server Server) completions(writer http.ResponseWriter, request *http.Reque
 }
 
 func (server Server) completeModelWithFallback(ctx context.Context, modelName string, deployment config.Model, body []byte, completer modelRequestCompleter) (providers.Response, error) {
+	maxFallbacks := server.config.MaxFallbacks
+	if maxFallbacks <= 0 {
+		maxFallbacks = 5
+	}
+	var lastErr error
 	failed := []config.Model{}
-	for {
+	for len(failed) <= maxFallbacks {
 		response, err := completer(ctx, deployment, body)
 		if err == nil && response.StatusCode < http.StatusInternalServerError {
 			return response, nil
@@ -1621,6 +1626,7 @@ func (server Server) completeModelWithFallback(ctx context.Context, modelName st
 		if response.Body != nil {
 			_ = response.Body.Close()
 		}
+		lastErr = err
 		failed = append(failed, deployment)
 		if server.router == nil {
 			return providers.Response{}, err
@@ -1631,6 +1637,7 @@ func (server Server) completeModelWithFallback(ctx context.Context, modelName st
 		}
 		deployment = next
 	}
+	return providers.Response{}, lastErr
 }
 
 func (server Server) cacheKey(body []byte, keyHash string) string {

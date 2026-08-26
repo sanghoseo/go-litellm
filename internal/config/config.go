@@ -24,6 +24,8 @@ type Config struct {
 	ModelAliases       map[string]string
 	ResourceModel      string
 	ForwardTraceparent bool
+	Fallbacks          []map[string][]string
+	MaxFallbacks       int
 }
 
 type Model struct {
@@ -35,6 +37,7 @@ type Model struct {
 	StreamTimeout time.Duration
 	NumRetries    int
 	AWSRegion     string
+	Weight        float64
 }
 
 type document struct {
@@ -58,6 +61,7 @@ type modelParams struct {
 	StreamTimeout float64 `yaml:"stream_timeout"`
 	NumRetries    int     `yaml:"num_retries"`
 	AWSRegion     string  `yaml:"aws_region_name"`
+	Weight        float64 `yaml:"weight"`
 }
 
 type generalSettings struct {
@@ -72,7 +76,9 @@ type litellmSettings struct {
 }
 
 type routerSettings struct {
-	ModelGroupAlias map[string]string `yaml:"model_group_alias"`
+	ModelGroupAlias map[string]string     `yaml:"model_group_alias"`
+	Fallbacks       []map[string][]string `yaml:"fallbacks"`
+	MaxFallbacks    int                   `yaml:"max_fallbacks"`
 }
 
 func Load(path string) (Config, error) {
@@ -127,7 +133,16 @@ func Load(path string) (Config, error) {
 		ModelAliases:       parsed.RouterSettings.ModelGroupAlias,
 		ResourceModel:      parsed.GeneralSettings.ResourceModel,
 		ForwardTraceparent: parsed.GeneralSettings.ForwardTraceparent,
+		Fallbacks:          parsed.RouterSettings.Fallbacks,
+		MaxFallbacks:       maxFallbacks(parsed.RouterSettings.MaxFallbacks),
 	}, nil
+}
+
+func maxFallbacks(value int) int {
+	if value <= 0 {
+		return 5
+	}
+	return value
 }
 
 func (config Config) WithRuntime(databaseURL string, redisURL string) Config {
@@ -159,7 +174,7 @@ func parseModel(entry modelEntry) (Model, error) {
 		return Model{}, fmt.Errorf("resolve litellm_params.api_base: %w", err)
 	}
 
-	return Model{Name: name, Model: modelName, APIKey: apiKey, APIBase: apiBase, Timeout: secondsDuration(entry.LiteLLMParams.Timeout), StreamTimeout: secondsDuration(entry.LiteLLMParams.StreamTimeout), NumRetries: entry.LiteLLMParams.NumRetries, AWSRegion: entry.LiteLLMParams.AWSRegion}, nil
+	return Model{Name: name, Model: modelName, APIKey: apiKey, APIBase: apiBase, Timeout: secondsDuration(entry.LiteLLMParams.Timeout), StreamTimeout: secondsDuration(entry.LiteLLMParams.StreamTimeout), NumRetries: entry.LiteLLMParams.NumRetries, AWSRegion: entry.LiteLLMParams.AWSRegion, Weight: entry.LiteLLMParams.Weight}, nil
 }
 
 func secondsDuration(value float64) time.Duration {

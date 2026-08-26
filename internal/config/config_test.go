@@ -38,7 +38,7 @@ general_settings:
 
 func TestLoadPreservesRouterAndRetrySettings(t *testing.T) {
 	configPath := writeConfig(t, `
-model_list:
+ model_list:
   - model_name: deployment
     litellm_params:
       model: openai/gpt-test
@@ -46,15 +46,22 @@ model_list:
       stream_timeout: 3
       num_retries: 4
       aws_region_name: us-east-1
-litellm_settings:
-  request_timeout: 10
-  num_retries: 2
-router_settings:
-  model_group_alias:
-    public-name: deployment
-general_settings:
-  resource_model: public-name
-  forward_traceparent_to_llm_provider: true
+      weight: 3
+ litellm_settings:
+   request_timeout: 10
+   num_retries: 2
+ router_settings:
+   model_group_alias:
+     public-name: deployment
+   fallbacks:
+     - deployment:
+         - backup-a
+     - "*":
+         - backup-b
+   max_fallbacks: 2
+ general_settings:
+   resource_model: public-name
+   forward_traceparent_to_llm_provider: true
 `)
 	loaded, err := Load(configPath)
 	if err != nil {
@@ -66,8 +73,17 @@ general_settings:
 	if loaded.RequestTimeout != 10*time.Second || loaded.NumRetries != 2 || loaded.ModelAliases["public-name"] != "deployment" || loaded.ResourceModel != "public-name" {
 		t.Fatalf("config = %#v", loaded)
 	}
-	if loaded.Models[0].Timeout != 2500*time.Millisecond || loaded.Models[0].StreamTimeout != 3*time.Second || loaded.Models[0].NumRetries != 4 || loaded.Models[0].AWSRegion != "us-east-1" {
+	if loaded.Models[0].Timeout != 2500*time.Millisecond || loaded.Models[0].StreamTimeout != 3*time.Second || loaded.Models[0].NumRetries != 4 || loaded.Models[0].AWSRegion != "us-east-1" || loaded.Models[0].Weight != 3 {
 		t.Fatalf("model = %#v", loaded.Models[0])
+	}
+	if loaded.MaxFallbacks != 2 {
+		t.Fatalf("MaxFallbacks = %d, want 2", loaded.MaxFallbacks)
+	}
+	if len(loaded.Fallbacks) != 2 {
+		t.Fatalf("Fallbacks = %#v, want 2 rules", loaded.Fallbacks)
+	}
+	if len(loaded.Fallbacks[0]["deployment"]) != 1 || loaded.Fallbacks[0]["deployment"][0] != "backup-a" || len(loaded.Fallbacks[1]["*"]) != 1 || loaded.Fallbacks[1]["*"][0] != "backup-b" {
+		t.Fatalf("Fallbacks = %#v", loaded.Fallbacks)
 	}
 }
 
@@ -80,6 +96,22 @@ model_list:
 
 	if _, err := Load(configPath); err == nil {
 		t.Fatal("Load() error = nil, want validation error")
+	}
+}
+
+func TestLoadDefaultsMaxFallbacks(t *testing.T) {
+	configPath := writeConfig(t, `
+model_list:
+  - model_name: gpt-test
+    litellm_params:
+      model: openai/gpt-test
+`)
+	loaded, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.MaxFallbacks != 5 {
+		t.Fatalf("MaxFallbacks = %d, want default 5", loaded.MaxFallbacks)
 	}
 }
 
