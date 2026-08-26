@@ -1777,6 +1777,20 @@ func (server Server) models(writer http.ResponseWriter, request *http.Request) {
 			OwnedBy: providerName(configuredModel.Model),
 		})
 	}
+	for alias, target := range server.config.ModelAliases {
+		if !auth.AllowsModel(virtualKey, alias) {
+			continue
+		}
+		if _, found := seen[alias]; found {
+			continue
+		}
+		seen[alias] = struct{}{}
+		ownedBy := "openai"
+		if deployment, found := server.deploymentFor(target); found {
+			ownedBy = providerName(deployment.Model)
+		}
+		models = append(models, modelResponse{ID: alias, Object: "model", Created: 0, OwnedBy: ownedBy})
+	}
 
 	writeJSON(writer, http.StatusOK, modelListResponse{Object: "list", Data: models})
 }

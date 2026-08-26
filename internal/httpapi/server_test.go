@@ -472,6 +472,19 @@ func TestModelReturnsConfiguredModelAndRejectsUnknownModel(t *testing.T) {
 	}
 }
 
+func TestModelsListsModelGroupAliases(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gpt-test", Model: "openai/gpt-test"}}, ModelAliases: map[string]string{"default": "gpt-test"}})
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"gpt-test"`) || !strings.Contains(response.Body.String(), `"id":"default"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestModelsAppliesAllVirtualKeyModelScopes(t *testing.T) {
 	server := NewServerWithVirtualKeyValidator(config.Config{Models: []config.Model{{Name: "shared", Model: "openai/shared"}, {Name: "key-only", Model: "openai/key-only"}}}, nil, scopedModelsValidator{})
 	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
