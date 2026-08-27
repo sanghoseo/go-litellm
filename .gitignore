@@ -146,3 +146,6 @@ crash.*.log
 
 ui/litellm-dashboard/out/
 litellm.log
+
+# Go proxy build output
+/bin

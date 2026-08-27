@@ -6,10 +6,11 @@
 - `enterprise/`, `ui/`, 배포된 wheel·tarball 및 Python test fixture는 이식 대상이 아니다.
 - Go는 Python 파일명을 그대로 사용하지 않는다. Go가 `_`로 시작하는 파일을 무시하고, 단일 책임 패키지 구성이 필요하기 때문이다.
 - 모든 행은 원본 Python contract, Go 구현, Go unit test, Python 대비 contract test가 모두 완료되어야 완료다.
+- 2026-08-27: P0 전환 완료 기준으로 원본 Python 런타임(`litellm/**/*.py`), Python packaging(`pyproject.toml`, `uv.lock`), Python test·CI·빌드 자산(`tests/`, `litellm-proxy-extras/`, `migrations/`, `docker/` Python entrypoint, Python 전용 GitHub workflows·scripts)을 제거했다. 보존한 `litellm/`은 Go 공통 SDK 파일(`context.go`, `errors.go`, `uuid.go` + 테스트)만 남는다. `terraform/`(독립 Go 모듈)·`litellm-rust/`(별도 Rust 트랙)·`helm/`·`db_scripts/*.sql`·`schema.prisma`·`model_prices_and_context_window.json`(Go code-gen 소스)은 Go proxy와 무관하거나 Go가 사용하므로 유지한다.
 
 | 단계 | 원본 영역 | Go 목적지 | 상태 |
 | --- | --- | --- | --- |
-| A | `litellm/_uuid.py`, `exceptions.py`, `_internal_context.py` | `litellm/` 공통 SDK | 부분 이식 |
+| A | `litellm/_uuid.py`, `exceptions.py`, `_internal_context.py` | `litellm/` 공통 SDK | P0 error 타입·UUID·context 이식; 나머지 exception 종류는 P0 범위 밖으로 원본과 함께 삭제 |
 | B | `litellm/types/`, `types/` | `pkg/types/` | chat/embedding/responses 핵심 OpenAI 타입 이식 |
 | C | `litellm/main.py`, `utils.py`, `router.py`, router strategy | `pkg/litellm/`, `internal/routing/` | 공개 chat/text Completion·Embedding·Responses·Moderation·Rerank·Image generation·Speech·Files·Batches/SSE SDK·router retry/alias/fallback·fallbacks 설정 기반 크로스 그룹 폴백·가중치 라우팅·max_fallbacks 이식 |
 | D | `litellm/llms/**`, provider transformations | `internal/providers/` | adapter registry·OpenAI·Azure·Anthropic chat/SSE·Gemini chat/SSE/embedding·Bedrock Converse chat/SSE·Cohere v2 chat/SSE/embedding/rerank·OpenRouter 및 `api_base` 기반 OpenAI-compatible(Groq/Mistral/DeepSeek/Perplexity/Together/Cerebras/Ollama/vLLM/xAI/Fireworks/SambaNova/NVIDIA NIM/Anyscale/Databricks) API 이식 |
@@ -29,6 +30,7 @@
 
 - `--local-dev`(embedded PostgreSQL + miniredis) 기동·인증·모델 조회 E2E 통과.
 - Docker 컨테이너 배포 검증: distroless 이미지에 Python 런타임(`/python`, `/uvicorn`)이 없고, 외부 PostgreSQL·Redis에 연결해 `/health/readiness` 200·`/v1/models` 200 반환.
+- Python 런타임 제거(2026-08-27): 원본 Python 파일 9,290여 개와 Python packaging·test·CI·빌드 자산 삭제 후 `go build`·`go vet`·`gofmt`·`go test ./...` green, distroless 이미지에 `.py`/`python*`/`uvicorn*`/`.so` 0개, `/health/liveliness` 200.
 - SSE 스트리밍 응답의 usage/cost 기록 지원(최종 chunk의 `usage` 파싱).
 - Python-Go contract 비교(실 Python proxy 대비, 동일 fixture):
   - 에러 envelope `{"error":{...}}`, 상태 코드(401/403/400), 인증→모델 접근(403 `key_model_access_denied`)→모델 존재 순서 일치.
