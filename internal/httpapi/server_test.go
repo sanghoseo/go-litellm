@@ -625,7 +625,8 @@ func TestEmbeddingsRecordsUsage(t *testing.T) {
 
 func TestChatCompletionsReturnsCachedResponse(t *testing.T) {
 	cache := &memoryResponseCache{values: map[string][]byte{}}
-	server := NewServerWithRuntime(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}}, usageChatCompleter{}, nil, nil, nil).WithResponseCache(cache)
+	recorder := &recordingUsageRecorder{}
+	server := NewServerWithRuntime(config.Config{MasterKey: "master-key", Models: []config.Model{{Name: "gateway-model", Model: "openai/gpt-5"}}}, usageChatCompleter{}, nil, recorder, nil).WithResponseCache(cache)
 	for requestNumber := 0; requestNumber < 2; requestNumber++ {
 		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gateway-model","messages":[]}`))
 		request.Header.Set("Authorization", "Bearer master-key")
@@ -637,6 +638,9 @@ func TestChatCompletionsReturnsCachedResponse(t *testing.T) {
 		if requestNumber == 1 && response.Header().Get("X-LiteLLM-Cache") != "hit" {
 			t.Fatalf("cache header = %q", response.Header().Get("X-LiteLLM-Cache"))
 		}
+	}
+	if len(recorder.records) != 2 {
+		t.Fatalf("usage records = %d, want 2 (cache hit must still record usage)", len(recorder.records))
 	}
 }
 

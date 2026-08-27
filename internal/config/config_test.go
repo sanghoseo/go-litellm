@@ -115,6 +115,38 @@ model_list:
 	}
 }
 
+func TestLoadResponseCacheIsOptIn(t *testing.T) {
+	disabledPath := writeConfig(t, `
+model_list:
+  - model_name: gpt-test
+    litellm_params:
+      model: openai/gpt-test
+`)
+	disabled, err := Load(disabledPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.ResponseCache {
+		t.Fatalf("ResponseCache = true, want default false")
+	}
+
+	enabledPath := writeConfig(t, `
+model_list:
+  - model_name: gpt-test
+    litellm_params:
+      model: openai/gpt-test
+litellm_settings:
+  cache: true
+`)
+	enabled, err := Load(enabledPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enabled.ResponseCache {
+		t.Fatalf("ResponseCache = false, want true when litellm_settings.cache is true")
+	}
+}
+
 func TestLoadReportsUnsupportedKeys(t *testing.T) {
 	configPath := writeConfig(t, `
 model_list:

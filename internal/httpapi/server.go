@@ -1624,17 +1624,18 @@ func (server Server) chatCompletions(writer http.ResponseWriter, request *http.R
 		return
 	}
 	cacheKey := server.cacheKey(body, virtualKey.TokenHash)
+	startedAt := time.Now().UTC()
 	if cacheKey != "" {
 		if cached, err := server.responseCache.Get(request.Context(), cacheKey); err == nil {
 			writer.Header().Set("Content-Type", "application/json")
 			writer.Header().Set("X-LiteLLM-Cache", "hit")
 			writer.WriteHeader(http.StatusOK)
 			_, _ = writer.Write(cached)
+			server.recordUsage(request.Context(), virtualKey, deployment, cached, startedAt, http.StatusOK, "chat_completion")
 			return
 		}
 	}
 
-	startedAt := time.Now().UTC()
 	upstream, err := server.completeModelWithFallback(request.Context(), modelName, deployment, body, server.chatCompleter.ChatCompletion)
 	if err != nil {
 		writeJSON(writer, http.StatusBadGateway, openAIError{Message: "Upstream provider request failed", Type: "api_error", Code: "upstream_error"})

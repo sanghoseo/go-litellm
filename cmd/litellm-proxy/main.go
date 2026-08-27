@@ -120,8 +120,10 @@ func run(configPath string, envFile string, listenAddress string, localDevelopme
 			return fmt.Errorf("ping Redis: %w", err)
 		}
 		requestLimiter = redisClient
-		responseCache = redisClient
 		readinessChecks = append(readinessChecks, redisClient)
+		if proxyConfig.ResponseCache {
+			responseCache = redisClient
+		}
 	}
 
 	providerRegistry := newProviderRegistry()

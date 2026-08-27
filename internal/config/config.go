@@ -26,6 +26,7 @@ type Config struct {
 	ForwardTraceparent bool
 	Fallbacks          []map[string][]string
 	MaxFallbacks       int
+	ResponseCache      bool
 	Unsupported        []string
 }
 
@@ -74,6 +75,7 @@ type generalSettings struct {
 type litellmSettings struct {
 	RequestTimeout float64 `yaml:"request_timeout"`
 	NumRetries     int     `yaml:"num_retries"`
+	Cache          bool    `yaml:"cache"`
 }
 
 type routerSettings struct {
@@ -140,6 +142,7 @@ func Load(path string) (Config, error) {
 		ForwardTraceparent: parsed.GeneralSettings.ForwardTraceparent,
 		Fallbacks:          parsed.RouterSettings.Fallbacks,
 		MaxFallbacks:       maxFallbacks(parsed.RouterSettings.MaxFallbacks),
+		ResponseCache:      parsed.LiteLLMSettings.Cache,
 		Unsupported:        unsupported,
 	}, nil
 }
@@ -153,7 +156,7 @@ func maxFallbacks(value int) int {
 
 var supportedModelParams = map[string]struct{}{"model": {}, "api_key": {}, "api_base": {}, "timeout": {}, "stream_timeout": {}, "num_retries": {}, "aws_region_name": {}, "weight": {}}
 var supportedGeneralSettings = map[string]struct{}{"master_key": {}, "resource_model": {}, "forward_traceparent_to_llm_provider": {}}
-var supportedLiteLLMSettings = map[string]struct{}{"request_timeout": {}, "num_retries": {}}
+var supportedLiteLLMSettings = map[string]struct{}{"request_timeout": {}, "num_retries": {}, "cache": {}}
 var supportedRouterSettings = map[string]struct{}{"model_group_alias": {}, "fallbacks": {}, "max_fallbacks": {}}
 var supportedTopLevel = map[string]struct{}{"model_list": {}, "general_settings": {}, "litellm_settings": {}, "router_settings": {}, "environment_variables": {}}
 
