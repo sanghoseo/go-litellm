@@ -42,5 +42,14 @@
     - `GET /user/info` 무파라미터: Python은 호출자 user(SSO `default_user_id`)를 반환하지만 SSO/SCIM은 제외 범위. Go는 master key 기반 admin이라 파라미터 필수.
   - management key CRUD(generate/info/list/delete/block/unblock/update) 상태 코드·payload 실 Python proxy와 일치 확인.
   - response cache는 `litellm_settings.cache: true`로 opt-in(기본 off, Python 기본값과 동일). cache hit에도 요청마다 usage/spend 기록 — 실 Python proxy(cache on) 3 요청 → 3행, Go 30 동시 요청 → 30행(총 300 tokens)으로 "usage 정확히 한 번 기록" 수용기준 충족 확인.
+- 부하·장애(resilience) 검증 — 실 PostgreSQL·Redis + mock provider:
+  - provider 장애: down 시 `502 upstream_error`, 복구 즉시 `200` 재처리 성공.
+  - Redis 장애: chat 요청은 degraded로 `200`(rate limit·cache 우회), `/health/readiness`는 `503`. 복구 후 `200`.
+  - PostgreSQL 재기동: 재기동 중 chat은 `200`(in-memory key·provider 호출 정상), 재기동 후 usage 기록 정상.
+  - graceful shutdown: SIGTERM 수신 시 in-flight 요청 drain 후 exit code 0.
+- 전환 지표(shadow/canary/rollback) 정의:
+  - shadow: Python·Go 동일 트래픽 mirroring. 비교 지표 = 상태 코드, 응답 body(hash), usage/tokens, cost, latency p50/p95. 기준 = 24h 동안 99.9% 상태 코드 일치 + 100% usage/tokens 일치.
+  - canary: 트래픽 1% → 10% → 50% → 100% 단계 증량. 단계 유지 1h 이상. 회귀 기준 = 5xx 비율 +10% 이상 또는 p95 latency +25% 이상 또는 usage 불일치 1건.
+  - rollback: canary 단계별 즉시 Python proxy 복귀. trigger = 회귀 기준 충족, DB migration은 rollback 스크립트 유지(단방향 DDL 금지).
   - proxy 인증 실패의 `type`/`code`는 OpenAI 표준(`invalid_api_key`)을 유지. 이 repo의 Go SDK client contract test가 같은 값을 검증. Python의 `auth_error`/`token_not_found_in_db`는 상태 코드와 envelope은 동일하므로 합의된 차이로 기록.
   - upstream 401은 provider 응답을 그대로 전파(OpenAI SDK가 받는 형태와 동일).
