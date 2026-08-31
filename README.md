@@ -1,8 +1,8 @@
 # go-litellm
 
-LiteLLM OSS의 Python 구현을 Go로 재구현하는 프로젝트다. 최종 결과물은 단일 Go 바이너리 `litellm-proxy`로 배포하는 AI Gateway(Proxy)이며, OpenAI 호환 HTTP API와 관리 대시보드를 제공한다.
+LiteLLM OSS의 Python 구현을 Go로 재구현한 AI Gateway(Proxy)다. 단일 Go 바이너리 `litellm-proxy`로 배포하며, OpenAI 호환 HTTP API와 관리 대시보드를 제공한다.
 
-개발·빌드·배포에서 Python 런타임 의존성을 제거하는 것이 목적이다. 전환 범위는 [PRD.md](PRD.md)와 [MIGRATION_MANIFEST.md](MIGRATION_MANIFEST.md)에 정의되어 있다.
+개발·빌드·배포에서 Python 런타임 의존성을 제거한다.
 
 ## 기능
 
@@ -115,9 +115,6 @@ ui/litellm-dashboard/ # 관리 대시보드 (Next.js, 기존 유지)
 
 ## 문서
 
-- [PRD.md](PRD.md) — Go 전환 목적 및 방향
-- [MIGRATION_MANIFEST.md](MIGRATION_MANIFEST.md) — Python → Go 전환 현황 (계약 기준)
-- [PYTHON_TO_GO_SCOPE.md](PYTHON_TO_GO_SCOPE.md) — 재개발 범위
 - [API.md](API.md) — 대시보드가 호출하는 REST API 전체 목록
 - [ARCHITECTURE.md](ARCHITECTURE.md) — 리포지토리 아키텍처
 - [UI.md](UI.md) — 대시보드 빌드/서빙 구조
