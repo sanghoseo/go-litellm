@@ -212,6 +212,24 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("POST /project/block", server.blockProject)
 	mux.HandleFunc("POST /project/unblock", server.unblockProject)
 	mux.HandleFunc("DELETE /project/delete", server.deleteProject)
+	mux.HandleFunc("POST /v2/login", server.uiLogin)
+	mux.HandleFunc("GET /v2/user/info", server.v2UserInfo)
+	mux.HandleFunc("GET /v2/team/list", server.v2TeamList)
+	mux.HandleFunc("POST /v2/key/info", server.v2KeyInfo)
+	mux.HandleFunc("GET /user/available_roles", server.availableRoles)
+	mux.HandleFunc("GET /get/ui_settings", server.uiSettingsPublic)
+	mux.HandleFunc("GET /sso/get/ui_settings", server.uiSettings)
+	mux.HandleFunc("GET /get/user_banner", server.userBanner)
+	mux.HandleFunc("GET /get/ui_theme_settings", server.uiThemeSettings)
+	mux.HandleFunc("GET /api/plugins", server.apiPlugins)
+	mux.HandleFunc("GET /health/readiness/details", server.readinessDetails)
+	mux.HandleFunc("GET /health/license", server.license)
+	mux.HandleFunc("GET /public/litellm_blog_posts", server.blogPosts)
+	mux.HandleFunc("GET /models", server.models)
+	mux.HandleFunc("GET /tag/list", server.tagList)
+	mux.HandleFunc("GET /v1/agents", server.agents)
+	mux.HandleFunc("GET /v2/guardrails/list", server.guardrailsList)
+	mux.HandleFunc("GET /guardrails/list", server.guardrailsList)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -924,7 +942,9 @@ func (server Server) listTeams(writer http.ResponseWriter, request *http.Request
 	for _, team := range teams {
 		response = append(response, teamResponseFrom(team))
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+	// The dashboard consumes /team/list as a bare array (fetchTeams passes it
+	// straight to Array.prototype.some), matching the Python list return.
+	writeJSON(writer, http.StatusOK, response)
 }
 
 func (server Server) updateTeam(writer http.ResponseWriter, request *http.Request) {
@@ -1446,7 +1466,9 @@ func (server Server) listOrganizations(w http.ResponseWriter, r *http.Request) {
 	for _, o := range os {
 		out = append(out, organizationResponseFrom(o))
 	}
-	writeJSON(w, 200, map[string]any{"data": out})
+	// The dashboard consumes this as a bare array (useOrganizations calls
+	// organizations.some), matching the Python list[...] response model.
+	writeJSON(w, 200, out)
 }
 func organizationResponseFrom(o auth.ManagedOrganization) organizationResponse {
 	return organizationResponse{OrganizationID: o.OrganizationID, OrganizationAlias: o.OrganizationAlias, BudgetID: o.BudgetID, Models: nonNilStrings(o.Models), Blocked: o.Blocked}
