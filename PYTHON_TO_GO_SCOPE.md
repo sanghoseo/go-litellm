@@ -112,7 +112,6 @@ parity 단계에서는 `internal/parity/` 아래에 원본 책임을 추적하�
 - adapter는 provider별 request transform, authentication, URL construction, response/stream normalization, usage extraction, error mapping만 담당한다
 - 공통 retry, timeout, routing, logging, spend write는 adapter 밖 Go service가 담당한다
 - 신규 provider 추가가 기존 flow 복사가 아니라 typed adapter registration과 provider-specific transform으로 끝나도록 설계한다
-- Rust에 이미 구현된 messages, responses/realtime, OCR, transcription transform은 `RUST_TO_GO_SCOPE.md`의 mapping과 동일한 Go package로 통합한다
 
 완료 기준: 지원 목록의 provider·endpoint 조합마다 Go contract test 또는 지원 중단 결정이 있고, Python provider module은 남지 않는다
 

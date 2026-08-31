@@ -7,6 +7,7 @@
 - Go는 Python 파일명을 그대로 사용하지 않는다. Go가 `_`로 시작하는 파일을 무시하고, 단일 책임 패키지 구성이 필요하기 때문이다.
 - 모든 행은 원본 Python contract, Go 구현, Go unit test, Python 대비 contract test가 모두 완료되어야 완료다.
 - 2026-08-27: P0 전환 완료 기준으로 원본 Python 런타임(`litellm/**/*.py`), Python packaging(`pyproject.toml`, `uv.lock`), Python test·CI·빌드 자산(`tests/`, `litellm-proxy-extras/`, `migrations/`, `docker/` Python entrypoint, Python 전용 GitHub workflows·scripts)을 제거했다. 보존한 `litellm/`은 Go 공통 SDK 파일(`context.go`, `errors.go`, `uuid.go` + 테스트)만 남는다. `terraform/`(독립 Go 모듈)·`litellm-rust/`(별도 Rust 트랙)·`helm/`·`db_scripts/*.sql`·`schema.prisma`·`model_prices_and_context_window.json`(Go code-gen 소스)은 Go proxy와 무관하거나 Go가 사용하므로 유지한다.
+- 2026-08-31: 별도 Rust 트랙 `litellm-rust/`와 `RUST_TO_GO_SCOPE.md`를 제거했다.
 
 | 단계 | 원본 영역 | Go 목적지 | 상태 |
 | --- | --- | --- | --- |
