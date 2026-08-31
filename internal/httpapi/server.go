@@ -237,6 +237,7 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /user/available_users", server.availableUsers)
 	mux.HandleFunc("GET /spend/logs/ui", server.uiSpendLogs)
 	mux.HandleFunc("GET /v2/model/info", server.modelInfoV2)
+	mux.HandleFunc("GET /get_image", server.getImage)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)

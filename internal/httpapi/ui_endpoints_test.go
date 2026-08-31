@@ -886,3 +886,26 @@ func TestModelInfoV2EndpointContract(t *testing.T) {
 		t.Fatalf("unauthenticated status = %d, want 401", unauthorizedResponse.Code)
 	}
 }
+
+func TestGetImageServesDefaultLogo(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"})
+
+	request := httptest.NewRequest(http.MethodGet, "/get_image", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want image/jpeg", got)
+	}
+	body := response.Body.Bytes()
+	if len(body) < 100 {
+		t.Fatalf("logo body too small: %d bytes", len(body))
+	}
+	// JPEG magic number (FFD8)
+	if body[0] != 0xFF || body[1] != 0xD8 {
+		t.Fatalf("body does not start with JPEG magic bytes: %x %x", body[0], body[1])
+	}
+}

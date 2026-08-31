@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,9 @@ import (
 
 	"github.com/BerriAI/litellm/go-proxy/internal/usage"
 )
+
+//go:embed logo.jpg
+var defaultLogo []byte
 
 const (
 	uiAdminUserID = "default_user_id"
@@ -387,6 +391,25 @@ func (server Server) guardrailsList(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"guardrails": []any{}})
+}
+
+// getImage implements GET /get_image, serving the navbar logo. A local file
+// from UI_LOGO_PATH (or an http(s) URL, which the browser follows) overrides
+// the bundled default, mirroring the Python proxy behaviour.
+func (server Server) getImage(writer http.ResponseWriter, request *http.Request) {
+	if logoPath := os.Getenv("UI_LOGO_PATH"); logoPath != "" {
+		if strings.HasPrefix(logoPath, "http://") || strings.HasPrefix(logoPath, "https://") {
+			http.Redirect(writer, request, logoPath, http.StatusFound)
+			return
+		}
+		if data, err := os.ReadFile(logoPath); err == nil && len(data) > 0 {
+			writer.Header().Set("Content-Type", "image/jpeg")
+			_, _ = writer.Write(data)
+			return
+		}
+	}
+	writer.Header().Set("Content-Type", "image/jpeg")
+	_, _ = writer.Write(defaultLogo)
 }
 
 // customerList implements GET /customer/list; the Go proxy does not track
