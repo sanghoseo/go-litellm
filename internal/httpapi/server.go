@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -230,6 +231,12 @@ func (server Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/agents", server.agents)
 	mux.HandleFunc("GET /v2/guardrails/list", server.guardrailsList)
 	mux.HandleFunc("GET /guardrails/list", server.guardrailsList)
+	mux.HandleFunc("GET /customer/list", server.customerList)
+	mux.HandleFunc("GET /gateway/daily/activity", server.gatewayDailyActivity)
+	mux.HandleFunc("GET /user/daily/activity/aggregated", server.userDailyActivityAggregated)
+	mux.HandleFunc("GET /user/available_users", server.availableUsers)
+	mux.HandleFunc("GET /spend/logs/ui", server.uiSpendLogs)
+	mux.HandleFunc("GET /v2/model/info", server.modelInfoV2)
 	mux.HandleFunc("POST /v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("POST /v1/completions", server.completions)
 	mux.HandleFunc("POST /v1/responses", server.responses)
@@ -1107,16 +1114,42 @@ func (server Server) listUsers(writer http.ResponseWriter, request *http.Request
 		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
 		return
 	}
-	users, err := server.userManager.ListUsers(request.Context(), 100)
+	users, err := server.userManager.ListUsers(request.Context(), 1000)
 	if err != nil {
 		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not list users", Type: "server_error", Code: "user_list_failed"})
 		return
 	}
-	response := make([]userResponse, 0, len(users))
-	for _, user := range users {
+	page := 1
+	pageSize := 100
+	if raw := request.URL.Query().Get("page"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	if raw := request.URL.Query().Get("page_size"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 100 {
+			pageSize = parsed
+		}
+	}
+	totalPages := 0
+	if len(users) > 0 {
+		totalPages = (len(users) + pageSize - 1) / pageSize
+	}
+	start := (page - 1) * pageSize
+	if start > len(users) {
+		start = len(users)
+	}
+	end := start + pageSize
+	if end > len(users) {
+		end = len(users)
+	}
+	response := make([]userResponse, 0, end-start)
+	for _, user := range users[start:end] {
 		response = append(response, userResponseFrom(user))
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"data": response})
+	// The dashboard consumes /user/list as {users, total, page, page_size,
+	// total_pages} (UserListResponse) for its infinite user queries.
+	writeJSON(writer, http.StatusOK, map[string]any{"users": response, "total": len(users), "page": page, "page_size": pageSize, "total_pages": totalPages})
 }
 
 func (server Server) updateUser(writer http.ResponseWriter, request *http.Request) {

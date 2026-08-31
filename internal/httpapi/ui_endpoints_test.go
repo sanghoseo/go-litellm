@@ -11,6 +11,7 @@ import (
 
 	"github.com/BerriAI/litellm/go-proxy/internal/auth"
 	"github.com/BerriAI/litellm/go-proxy/internal/config"
+	"github.com/BerriAI/litellm/go-proxy/internal/usage"
 )
 
 func decodeJWTClaims(t *testing.T, token string) map[string]any {
@@ -592,5 +593,296 @@ func TestTeamListV1ReturnsBareArray(t *testing.T) {
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &teams); err != nil || len(teams) != 1 || teams[0].TeamID != "team-test" {
 		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestUserListReturnsPaginatedShape(t *testing.T) {
+	manager := &memoryUserManager{users: map[string]auth.ManagedUser{}}
+	for _, id := range []string{"user-a", "user-b", "user-c"} {
+		manager.users[id] = auth.ManagedUser{UserID: id, UserEmail: id + "@example.com"}
+	}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithUserManager(manager)
+
+	page1 := httptest.NewRequest(http.MethodGet, "/user/list?page=1&page_size=2", nil)
+	page1.Header.Set("Authorization", "Bearer master-key")
+	page1Response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(page1Response, page1)
+
+	if page1Response.Code != http.StatusOK {
+		t.Fatalf("page1 status = %d body = %s", page1Response.Code, page1Response.Body.String())
+	}
+	var first struct {
+		Page       int `json:"page"`
+		PageSize   int `json:"page_size"`
+		Total      int `json:"total"`
+		TotalPages int `json:"total_pages"`
+		Users      []struct {
+			UserID string `json:"user_id"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(page1Response.Body.Bytes(), &first); err != nil {
+		t.Fatalf("unmarshal: %v body = %s", err, page1Response.Body.String())
+	}
+	if first.Page != 1 || first.PageSize != 2 || first.Total != 3 || first.TotalPages != 2 || len(first.Users) != 2 {
+		t.Fatalf("page1 = %+v", first)
+	}
+
+	page2 := httptest.NewRequest(http.MethodGet, "/user/list?page=2&page_size=2", nil)
+	page2.Header.Set("Authorization", "Bearer master-key")
+	page2Response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(page2Response, page2)
+
+	var second struct {
+		Page  int `json:"page"`
+		Users []struct {
+			UserID string `json:"user_id"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(page2Response.Body.Bytes(), &second); err != nil || second.Page != 2 || len(second.Users) != 1 {
+		t.Fatalf("page2 = %s", page2Response.Body.String())
+	}
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/user/list", nil)
+	unauthorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", unauthorizedResponse.Code)
+	}
+}
+
+func TestCustomerListReturnsEmptyArray(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"})
+
+	request := httptest.NewRequest(http.MethodGet, "/customer/list", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != "[]" {
+		t.Fatalf("status = %d body = %q, want []", response.Code, response.Body.String())
+	}
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/customer/list", nil)
+	unauthorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", unauthorizedResponse.Code)
+	}
+}
+
+func TestGatewayDailyActivityReturnsZeroedShape(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"})
+	request := httptest.NewRequest(http.MethodGet, "/gateway/daily/activity", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		TotalSuccessfulRequests int   `json:"total_successful_requests"`
+		TotalFailedRequests     int   `json:"total_failed_requests"`
+		ByDate                  []any `json:"by_date"`
+		ByRoute                 []any `json:"by_route"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body = %s", err, response.Body.String())
+	}
+	if body.ByDate == nil || body.ByRoute == nil || len(body.ByDate) != 0 || len(body.ByRoute) != 0 {
+		t.Fatalf("body = %s, want empty by_date/by_route arrays", response.Body.String())
+	}
+}
+
+func TestUserDailyActivityAggregatedReturnsEmptyResults(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"})
+	request := httptest.NewRequest(http.MethodGet, "/user/daily/activity/aggregated?start_date=2026-08-01&end_date=2026-08-31", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Results  []any `json:"results"`
+		Metadata struct {
+			TotalSpend  float64 `json:"total_spend"`
+			Page        int     `json:"page"`
+			TotalPages  int     `json:"total_pages"`
+			HasMore     bool    `json:"has_more"`
+			TotalTokens int     `json:"total_tokens"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body = %s", err, response.Body.String())
+	}
+	if body.Results == nil || len(body.Results) != 0 || body.Metadata.Page != 1 || body.Metadata.TotalPages != 1 || body.Metadata.HasMore {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestAvailableUsersReturnsUnlicensedShape(t *testing.T) {
+	server := NewServer(config.Config{MasterKey: "master-key"})
+	request := httptest.NewRequest(http.MethodGet, "/user/available_users", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		TotalUsers          any `json:"total_users"`
+		TotalUsersUsed      int `json:"total_users_used"`
+		TotalUsersRemaining any `json:"total_users_remaining"`
+		TotalTeams          any `json:"total_teams"`
+		TotalTeamsUsed      int `json:"total_teams_used"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body = %s", err, response.Body.String())
+	}
+	if body.TotalUsers != nil || body.TotalTeams != nil || body.TotalUsersUsed != 0 || body.TotalTeamsUsed != 0 {
+		t.Fatalf("body = %s, want null limits and zeroed used counts", response.Body.String())
+	}
+}
+
+func TestUiSpendLogsEndpointContract(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	logs := []usage.Log{
+		{RequestID: "req-old", Model: "gpt-4o-mini", CallType: "completion", TotalTokens: 10, Status: "success", StartedAt: now.Add(-2 * time.Hour), CompletedAt: now.Add(-2*time.Hour + time.Second)},
+		{RequestID: "req-mid", Model: "gpt-4o-mini", CallType: "completion", TotalTokens: 20, Status: "success", StartedAt: now.Add(-1 * time.Hour), CompletedAt: now.Add(-1*time.Hour + time.Second)},
+		{RequestID: "req-new", Model: "claude", CallType: "completion", TotalTokens: 30, Status: "success", StartedAt: now, CompletedAt: now.Add(time.Second)},
+	}
+	server := NewServer(config.Config{MasterKey: "master-key"}).WithSpendLogReader(memorySpendLogReader{logs: logs})
+
+	request := httptest.NewRequest(http.MethodGet, "/spend/logs/ui?start_date=2026-08-31%2000:00:00&end_date=2026-08-31%2023:59:59&page=1&page_size=2", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Data []struct {
+			RequestID   string `json:"request_id"`
+			Model       string `json:"model"`
+			TotalTokens int    `json:"total_tokens"`
+			StartTime   string `json:"startTime"`
+			EndTime     string `json:"endTime"`
+			CallType    string `json:"call_type"`
+		} `json:"data"`
+		Total      int `json:"total"`
+		Page       int `json:"page"`
+		PageSize   int `json:"page_size"`
+		TotalPages int `json:"total_pages"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body = %s", err, response.Body.String())
+	}
+	if body.Total != 3 || body.Page != 1 || body.PageSize != 2 || body.TotalPages != 2 || len(body.Data) != 2 {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+	if body.Data[0].RequestID != "req-new" || body.Data[1].RequestID != "req-mid" {
+		t.Fatalf("expected startTime desc order, got %s then %s", body.Data[0].RequestID, body.Data[1].RequestID)
+	}
+	if body.Data[0].StartTime == "" || body.Data[0].EndTime == "" {
+		t.Fatalf("missing startTime/endTime: %s", response.Body.String())
+	}
+
+	// page 2 has the remaining entry
+	page2 := httptest.NewRequest(http.MethodGet, "/spend/logs/ui?start_date=2026-08-31%2000:00:00&end_date=2026-08-31%2023:59:59&page=2&page_size=2", nil)
+	page2.Header.Set("Authorization", "Bearer master-key")
+	page2Response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(page2Response, page2)
+	var second struct {
+		Data []struct {
+			RequestID string `json:"request_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(page2Response.Body.Bytes(), &second); err != nil || len(second.Data) != 1 || second.Data[0].RequestID != "req-old" {
+		t.Fatalf("page2 = %s", page2Response.Body.String())
+	}
+
+	// time range filter excludes older logs
+	filtered := httptest.NewRequest(http.MethodGet, "/spend/logs/ui?start_date=2026-08-31%2011:00:00&end_date=2026-08-31%2023:59:59&page=1&page_size=50", nil)
+	filtered.Header.Set("Authorization", "Bearer master-key")
+	filteredResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(filteredResponse, filtered)
+	var filterBody struct {
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(filteredResponse.Body.Bytes(), &filterBody); err != nil || filterBody.Total != 2 {
+		t.Fatalf("time-filtered total = %s", filteredResponse.Body.String())
+	}
+
+	// model filter
+	byModel := httptest.NewRequest(http.MethodGet, "/spend/logs/ui?start_date=2026-08-31%2000:00:00&end_date=2026-08-31%2023:59:59&page=1&page_size=50&model=claude", nil)
+	byModel.Header.Set("Authorization", "Bearer master-key")
+	byModelResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(byModelResponse, byModel)
+	var modelBody struct {
+		Data []struct {
+			Model string `json:"model"`
+		} `json:"data"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(byModelResponse.Body.Bytes(), &modelBody); err != nil || modelBody.Total != 1 || modelBody.Data[0].Model != "claude" {
+		t.Fatalf("model-filtered = %s", byModelResponse.Body.String())
+	}
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/spend/logs/ui", nil)
+	unauthorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", unauthorizedResponse.Code)
+	}
+}
+
+func TestModelInfoV2EndpointContract(t *testing.T) {
+	server := NewServer(config.Config{
+		MasterKey: "master-key",
+		Models: []config.Model{
+			{Name: "gpt-4o-mini", Model: "openai/gpt-4o-mini", APIBase: "http://127.0.0.1:14999/v1"},
+			{Name: "claude", Model: "anthropic/claude"},
+		},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v2/model/info?include_team_models=true&page=1&size=50", nil)
+	request.Header.Set("Authorization", "Bearer master-key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Data []struct {
+			ModelName        string `json:"model_name"`
+			LiteLLMModelName string `json:"litellm_model_name"`
+		} `json:"data"`
+		TotalCount  int `json:"total_count"`
+		CurrentPage int `json:"current_page"`
+		TotalPages  int `json:"total_pages"`
+		Size        int `json:"size"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body = %s", err, response.Body.String())
+	}
+	if body.TotalCount != 2 || body.CurrentPage != 1 || body.TotalPages != 1 || body.Size != 50 || len(body.Data) != 2 {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+	if body.Data[0].ModelName != "gpt-4o-mini" || body.Data[0].LiteLLMModelName != "openai/gpt-4o-mini" {
+		t.Fatalf("data = %s", response.Body.String())
+	}
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/v2/model/info", nil)
+	unauthorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", unauthorizedResponse.Code)
 	}
 }

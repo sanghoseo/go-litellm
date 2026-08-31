@@ -10,8 +10,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/BerriAI/litellm/go-proxy/internal/usage"
 )
 
 const (
@@ -383,4 +387,337 @@ func (server Server) guardrailsList(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"guardrails": []any{}})
+}
+
+// customerList implements GET /customer/list; the Go proxy does not track
+// end users (customers), so the dashboard dropdown stays empty.
+func (server Server) customerList(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, []any{})
+}
+
+// gatewayDailyActivity implements GET /gateway/daily/activity with zeroed
+// counters; the Go proxy does not record per-route gateway request stats yet.
+func (server Server) gatewayDailyActivity(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"total_successful_requests": 0,
+		"total_failed_requests":     0,
+		"by_date":                   []any{},
+		"by_route":                  []any{},
+	})
+}
+
+// userDailyActivityAggregated implements GET /user/daily/activity/aggregated
+// with empty results; the usage page renders its empty state from this shape.
+func (server Server) userDailyActivityAggregated(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"results": []any{},
+		"metadata": map[string]any{
+			"total_spend":                        0.0,
+			"total_flat_cost":                    0.0,
+			"total_prompt_tokens":                0,
+			"total_completion_tokens":            0,
+			"total_tokens":                       0,
+			"total_api_requests":                 0,
+			"total_successful_requests":          0,
+			"total_failed_requests":              0,
+			"total_cache_read_input_tokens":      0,
+			"total_cache_creation_input_tokens":  0,
+			"total_compression_saved_tokens":     0,
+			"total_compression_savings_spend":    0.0,
+			"total_prompt_caching_savings_spend": 0.0,
+			"total_autorouter_savings_spend":     0.0,
+			"page":                               1,
+			"total_pages":                        1,
+			"has_more":                           false,
+		},
+	})
+}
+
+func parseUILogTime(value string, endOfDay bool) (time.Time, bool) {
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02"} {
+		parsed, err := time.ParseInLocation(layout, value, time.UTC)
+		if err != nil {
+			continue
+		}
+		if layout == "2006-01-02" && endOfDay {
+			return parsed.Add(24*time.Hour - time.Nanosecond), true
+		}
+		return parsed, true
+	}
+	return time.Time{}, false
+}
+
+// uiSpendLogs implements GET /spend/logs/ui with the paginated shape the
+// dashboard Request Logs table consumes: {data, total, page, page_size,
+// total_pages}. Records come from the spend log store; dimensions the Go
+// proxy does not track yet (user, team, end user, cost) stay empty.
+func (server Server) uiSpendLogs(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) || server.spendLogReader == nil {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	query := request.URL.Query()
+	page := 1
+	pageSize := 50
+	if raw := query.Get("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Invalid page value", Type: "invalid_request_error", Code: "invalid_query_param"})
+			return
+		}
+		page = parsed
+	}
+	if raw := query.Get("page_size"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 1000 {
+			writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Invalid page_size value", Type: "invalid_request_error", Code: "invalid_query_param"})
+			return
+		}
+		pageSize = parsed
+	}
+	var startTime, endTime time.Time
+	if raw := query.Get("start_date"); raw != "" {
+		parsed, ok := parseUILogTime(raw, false)
+		if !ok {
+			writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Invalid start_date value", Type: "invalid_request_error", Code: "invalid_query_param"})
+			return
+		}
+		startTime = parsed
+	}
+	if raw := query.Get("end_date"); raw != "" {
+		parsed, ok := parseUILogTime(raw, true)
+		if !ok {
+			writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Invalid end_date value", Type: "invalid_request_error", Code: "invalid_query_param"})
+			return
+		}
+		endTime = parsed
+	}
+	modelFilter := query.Get("model")
+	apiKeyFilter := query.Get("api_key")
+	requestIDFilter := query.Get("request_id")
+	statusFilter := query.Get("status_filter")
+	if query.Get("user_id") != "" || query.Get("team_id") != "" || query.Get("end_user") != "" || query.Get("session_id") != "" {
+		// The Go proxy does not record these dimensions yet, so any request
+		// filtering on them cannot match a stored log.
+		writeJSON(writer, http.StatusOK, uiSpendLogsResponse(nil, 0, page, pageSize))
+		return
+	}
+	logs, err := server.spendLogReader.List(request.Context(), 1000)
+	if err != nil {
+		writeJSON(writer, http.StatusInternalServerError, openAIError{Message: "Could not list spend logs", Type: "server_error", Code: "spend_log_list_failed"})
+		return
+	}
+	matches := make([]usage.Log, 0, len(logs))
+	for _, log := range logs {
+		if !startTime.IsZero() && log.StartedAt.Before(startTime) {
+			continue
+		}
+		if !endTime.IsZero() && log.StartedAt.After(endTime) {
+			continue
+		}
+		if modelFilter != "" && log.Model != modelFilter {
+			continue
+		}
+		if apiKeyFilter != "" && log.APIKeyHash != apiKeyFilter {
+			continue
+		}
+		if requestIDFilter != "" && log.RequestID != requestIDFilter {
+			continue
+		}
+		if statusFilter == "success" && log.Status != "success" {
+			continue
+		}
+		if (statusFilter == "error" || statusFilter == "failed") && log.Status == "success" {
+			continue
+		}
+		matches = append(matches, log)
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		less := false
+		switch query.Get("sort_by") {
+		case "total_tokens":
+			less = matches[i].TotalTokens < matches[j].TotalTokens
+		case "endTime":
+			less = matches[i].CompletedAt.Before(matches[j].CompletedAt)
+		case "model":
+			less = matches[i].Model < matches[j].Model
+		default:
+			less = matches[i].StartedAt.Before(matches[j].StartedAt)
+		}
+		if query.Get("sort_order") == "asc" {
+			return less
+		}
+		return !less
+	})
+	total := len(matches)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	entries := make([]map[string]any, 0, end-start)
+	for _, log := range matches[start:end] {
+		entries = append(entries, uiSpendLogEntry(log))
+	}
+	writeJSON(writer, http.StatusOK, uiSpendLogsResponse(entries, total, page, pageSize))
+}
+
+func uiSpendLogsResponse(entries []map[string]any, total, page, pageSize int) map[string]any {
+	totalPages := 0
+	if total > 0 && pageSize > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	return map[string]any{
+		"data":            entries,
+		"total":           total,
+		"page":            page,
+		"page_size":       pageSize,
+		"total_pages":     totalPages,
+		"total_is_capped": false,
+	}
+}
+
+func uiSpendLogEntry(log usage.Log) map[string]any {
+	durationMS := 0
+	if !log.CompletedAt.IsZero() && !log.StartedAt.IsZero() {
+		durationMS = int(log.CompletedAt.Sub(log.StartedAt).Milliseconds())
+	}
+	return map[string]any{
+		"request_id":          log.RequestID,
+		"api_key":             log.APIKeyHash,
+		"team_id":             "",
+		"model":               log.Model,
+		"model_id":            log.Model,
+		"model_group":         "",
+		"api_base":            "",
+		"call_type":           log.CallType,
+		"spend":               0.0,
+		"total_tokens":        log.TotalTokens,
+		"prompt_tokens":       0,
+		"completion_tokens":   log.TotalTokens,
+		"startTime":           log.StartedAt.UTC().Format(time.RFC3339),
+		"endTime":             log.CompletedAt.UTC().Format(time.RFC3339),
+		"user":                "",
+		"end_user":            "",
+		"custom_llm_provider": log.Provider,
+		"metadata":            map[string]any{},
+		"cache_hit":           "",
+		"request_tags":        map[string]any{},
+		"messages":            "",
+		"response":            "",
+		"session_id":          "",
+		"status":              log.Status,
+		"request_duration_ms": durationMS,
+	}
+}
+
+// modelInfoV2 implements GET /v2/model/info with the paginated shape the
+// dashboard models list consumes: {data, total_count, current_page,
+// total_pages, size}.
+func (server Server) modelInfoV2(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	query := request.URL.Query()
+	page := 1
+	size := 50
+	if raw := query.Get("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Invalid page value", Type: "invalid_request_error", Code: "invalid_query_param"})
+			return
+		}
+		page = parsed
+	}
+	if raw := query.Get("size"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 1000 {
+			writeJSON(writer, http.StatusBadRequest, openAIError{Message: "Invalid size value", Type: "invalid_request_error", Code: "invalid_query_param"})
+			return
+		}
+		size = parsed
+	}
+	search := strings.ToLower(strings.TrimSpace(query.Get("search")))
+	entries := make([]map[string]any, 0, len(server.config.Models))
+	for _, model := range server.config.Models {
+		if search != "" && !strings.Contains(strings.ToLower(model.Name), search) && !strings.Contains(strings.ToLower(model.Model), search) {
+			continue
+		}
+		entries = append(entries, map[string]any{
+			"model_name":         model.Name,
+			"litellm_model_name": model.Model,
+			"mode":               "chat",
+			"max_tokens":         0,
+			"model_info": map[string]any{
+				"base_model":            model.Model,
+				"input_cost_per_token":  0.0,
+				"output_cost_per_token": 0.0,
+			},
+		})
+	}
+	totalCount := len(entries)
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + size - 1) / size
+	}
+	start := (page - 1) * size
+	if start > totalCount {
+		start = totalCount
+	}
+	end := start + size
+	if end > totalCount {
+		end = totalCount
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"data":         entries[start:end],
+		"total_count":  totalCount,
+		"current_page": page,
+		"total_pages":  totalPages,
+		"size":         size,
+	})
+}
+
+// availableUsers implements GET /user/available_users; without a commercial
+// license the limits are null and only the used counts are reported.
+func (server Server) availableUsers(writer http.ResponseWriter, request *http.Request) {
+	if !server.authorizeAdmin(request) {
+		writeJSON(writer, http.StatusUnauthorized, openAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"})
+		return
+	}
+	usersUsed := 0
+	teamsUsed := 0
+	if server.userManager != nil {
+		if users, err := server.userManager.ListUsers(request.Context(), 1000); err == nil {
+			usersUsed = len(users)
+		}
+	}
+	if server.teamManager != nil {
+		if teams, err := server.teamManager.ListTeams(request.Context(), 1000); err == nil {
+			teamsUsed = len(teams)
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"total_users":           nil,
+		"total_users_used":      usersUsed,
+		"total_users_remaining": nil,
+		"total_teams":           nil,
+		"total_teams_used":      teamsUsed,
+		"total_teams_remaining": nil,
+	})
 }
